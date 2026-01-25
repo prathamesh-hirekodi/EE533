@@ -1,0 +1,46 @@
+module alu32_with_counter (
+    input  wire        clk,
+    input  wire        rst_n,    
+    input  wire        enable,  
+    input  wire [3:0]  alu_op,    
+    input  wire [31:0] a,     
+    input  wire [31:0] b,         
+    output reg  [31:0] result,    
+    output reg         zero,      
+    output reg  [31:0] op_count   
+    
+    localparam ADD = 4'b0000;
+    localparam SUB = 4'b0001;
+    localparam AND = 4'b0010;
+    localparam OR  = 4'b0011;
+    localparam XOR = 4'b0100;
+    localparam SLT = 4'b0101;
+    localparam SLL = 4'b0110;
+    localparam SRL = 4'b0111;
+
+      always @(*) begin
+        case (alu_op)
+            ADD: result = a + b;
+            SUB: result = a - b;
+            AND: result = a & b;
+            OR : result = a | b;
+            XOR: result = a ^ b;
+            SLT: result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0;
+            SLL: result = a << b[4:0];
+            SRL: result = a >> b[4:0];
+            default: result = 32'd0;
+        endcase
+    end
+
+       always @(*) begin
+        zero = (result == 32'd0);
+    end
+
+      always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            op_count <= 32'd0;
+        else if (enable)
+            op_count <= op_count + 1;
+    end
+
+endmodule
