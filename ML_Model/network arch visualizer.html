@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEC104 ANN — Network Architecture</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #0d0f14;
+  --bg2: #141720;
+  --bg3: #1b1f2b;
+  --border: #2d3347;
+  --border2: #3d4560;
+  --text: #e8eaf0;
+  --text2: #9aa0b8;
+  --text3: #5e657d;
+  --input: #3dca7f;
+  --h1-color: #7b5cf0;
+  --h2-color: #f5a623;
+  --out-color: #f56060;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 40px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.title {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.subtitle {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text3);
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+
+.pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 14px;
+}
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.pill-blue   { color: #4f8ef7; border-color: rgba(79,142,247,0.35); background: rgba(79,142,247,0.08); }
+.pill-green  { color: var(--input); border-color: rgba(61,202,127,0.35); background: rgba(61,202,127,0.08); }
+.pill-purple { color: var(--h1-color); border-color: rgba(123,92,240,0.35); background: rgba(123,92,240,0.08); }
+.pill-amber  { color: var(--h2-color); border-color: rgba(245,166,35,0.35); background: rgba(245,166,35,0.08); }
+.pill-red    { color: var(--out-color); border-color: rgba(245,96,96,0.35); background: rgba(245,96,96,0.08); }
+
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 900px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.diagram-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+canvas#netCanvas {
+  display: block;
+  margin: 0 auto;
+}
+
+.layer-info {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 24px;
+}
+.layer-box {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.layer-box.input  { border-left-color: var(--input); }
+.layer-box.h1     { border-left-color: var(--h1-color); }
+.layer-box.h2     { border-left-color: var(--h2-color); }
+.layer-box.output { border-left-color: var(--out-color); }
+.layer-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 4px;
+}
+.layer-size {
+  font-size: 20px;
+  font-weight: 500;
+  font-family: var(--mono);
+  margin-bottom: 4px;
+}
+.layer-desc {
+  font-size: 11px;
+  color: var(--text2);
+  font-family: var(--mono);
+  line-height: 1.5;
+}
+
+.flow-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+.flow-op {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: var(--text2);
+}
+.flow-arrow { color: var(--border2); }
+
+.param-table {
+  margin-top: 24px;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.param-table th,
+.param-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.param-table th {
+  color: var(--text3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+.param-table td {
+  color: var(--text2);
+}
+.param-table td.num {
+  text-align: right;
+  color: var(--text);
+}
+.param-table tr.total td {
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: none;
+  border-top: 1px solid var(--border2);
+  padding-top: 12px;
+}
+
+@media (max-width: 700px) {
+  .layer-info { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">IEC104 ANN · Network Architecture</div>
+  <div class="subtitle">Linear → ReLU → Linear → ReLU → Linear</div>
+  <div class="pills">
+    <span class="pill pill-blue">40 → 96 → 42 → 4</span>
+    <span class="pill pill-green">BF16 weights</span>
+    <span class="pill pill-amber">8,182 params</span>
+    <span class="pill pill-purple">4-class classifier</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="diagram-wrap">
+    <canvas id="netCanvas" width="820" height="360"></canvas>
+  </div>
+
+  <div class="layer-info">
+    <div class="layer-box input">
+      <div class="layer-name">Input</div>
+      <div class="layer-size">40</div>
+      <div class="layer-desc">Top-40 features<br>by LightGBM</div>
+    </div>
+    <div class="layer-box h1">
+      <div class="layer-name">Hidden 1</div>
+      <div class="layer-size">96</div>
+      <div class="layer-desc">Linear → ReLU<br>3,936 params</div>
+    </div>
+    <div class="layer-box h2">
+      <div class="layer-name">Hidden 2</div>
+      <div class="layer-size">42</div>
+      <div class="layer-desc">Linear → ReLU<br>4,074 params</div>
+    </div>
+    <div class="layer-box output">
+      <div class="layer-name">Output</div>
+      <div class="layer-size">4</div>
+      <div class="layer-desc">DoS · NORMAL<br>c_ci_na_1 · c_se_na_1</div>
+    </div>
+  </div>
+
+  <div class="flow-row">
+    <span>x</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-op">W₁ · x + b₁</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-op">ReLU</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-op">W₂ · h₁ + b₂</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-op">ReLU</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-op">W₃ · h₂ + b₃</span>
+    <span class="flow-arrow">→</span>
+    <span>logits</span>
+  </div>
+
+  <table class="param-table">
+    <thead>
+      <tr>
+        <th>Layer</th>
+        <th>Shape</th>
+        <th>Weights</th>
+        <th>Biases</th>
+        <th style="text-align:right;">Total params</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>fc1 (Linear)</td>
+        <td>40 → 96</td>
+        <td class="num">3,840</td>
+        <td class="num">96</td>
+        <td class="num">3,936</td>
+      </tr>
+      <tr>
+        <td>fc2 (Linear)</td>
+        <td>96 → 42</td>
+        <td class="num">4,032</td>
+        <td class="num">42</td>
+        <td class="num">4,074</td>
+      </tr>
+      <tr>
+        <td>fc3 (Linear)</td>
+        <td>42 → 4</td>
+        <td class="num">168</td>
+        <td class="num">4</td>
+        <td class="num">172</td>
+      </tr>
+      <tr class="total">
+        <td>Total</td>
+        <td>—</td>
+        <td class="num">8,040</td>
+        <td class="num">142</td>
+        <td class="num">8,182</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+// ─── Canvas-based network architecture diagram ──────────────────────────────
+const canvas = document.getElementById('netCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+// Layer definitions
+const layers = [
+  { n: 40, show: 14, label: 'Input',    sub: '40 features',      color: '#3dca7f', x: 100 },
+  { n: 96, show: 20, label: 'Hidden 1', sub: '96 units · ReLU',  color: '#7b5cf0', x: 320 },
+  { n: 42, show: 16, label: 'Hidden 2', sub: '42 units · ReLU',  color: '#f5a623', x: 540 },
+  { n: 4,  show: 4,  label: 'Output',   sub: '4 classes',        color: '#f56060', x: 740 },
+];
+
+const R = 7;      // neuron radius
+const TOP = 60;   // top margin for labels
+const BOT = 40;   // bottom margin
+
+function neuronY(layerIdx, nIdx) {
+  const show = layers[layerIdx].show;
+  const available = H - TOP - BOT;
+  const spacing = Math.min(16, available / (show + 1));
+  const totalHeight = (show - 1) * spacing;
+  const startY = TOP + (available - totalHeight) / 2;
+  return startY + nIdx * spacing;
+}
+
+// ─── Draw connections between layers (subsampled for clarity) ──────────────
+function drawConnections() {
+  for (let li = 0; li < layers.length - 1; li++) {
+    const src = layers[li], dst = layers[li + 1];
+    for (let a = 0; a < src.show; a++) {
+      for (let b = 0; b < dst.show; b++) {
+        const x1 = src.x + R, y1 = neuronY(li, a);
+        const x2 = dst.x - R, y2 = neuronY(li + 1, b);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = '#4f8ef7';
+        ctx.globalAlpha = 0.05;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── Draw neurons as colored circles ────────────────────────────────────────
+function drawNeurons() {
+  layers.forEach((layer, li) => {
+    for (let ni = 0; ni < layer.show; ni++) {
+      const x = layer.x, y = neuronY(li, ni);
+      ctx.beginPath();
+      ctx.arc(x, y, R, 0, 2 * Math.PI);
+      ctx.fillStyle = '#1b1f2b';
+      ctx.fill();
+      ctx.strokeStyle = layer.color;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    // Ellipsis marker if not all neurons shown
+    if (layer.n > layer.show) {
+      const lastY = neuronY(li, layer.show - 1);
+      ctx.fillStyle = '#5e657d';
+      ctx.font = '14px IBM Plex Sans, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⋮', layer.x, lastY + 20);
+    }
+  });
+}
+
+// ─── Draw layer labels above each column ───────────────────────────────────
+function drawLabels() {
+  layers.forEach(layer => {
+    ctx.fillStyle = layer.color;
+    ctx.font = '500 14px IBM Plex Sans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(layer.label, layer.x, 18);
+
+    ctx.fillStyle = '#5e657d';
+    ctx.font = '11px IBM Plex Mono, monospace';
+    ctx.fillText(layer.sub, layer.x, 36);
+  });
+
+  // Activation labels between layers
+  const activations = ['ReLU', 'ReLU', 'linear'];
+  for (let li = 0; li < 3; li++) {
+    const midX = (layers[li].x + layers[li + 1].x) / 2;
+    ctx.fillStyle = '#3d4560';
+    ctx.font = '10px IBM Plex Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(activations[li], midX, H - 20);
+  }
+}
+
+// ─── Render everything ─────────────────────────────────────────────────────
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawConnections();
+  drawNeurons();
+  drawLabels();
+}
+
+render();
+</script>
+</body>
+</html>

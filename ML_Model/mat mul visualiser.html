@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANN Matrix Multiplication Walkthrough · 40 → 96 → 42 → 4</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   Matrix-mul focused visualizer. Every shape, every MAC, every layer.
+   Tweak the CSS variables to retheme. All computation is BF16-rounded.
+   ═══════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg:       #0a0c12;
+  --bg2:      #111420;
+  --bg3:      #181c2a;
+  --bg4:      #222839;
+  --border:   #2a3148;
+  --border2:  #3a4265;
+  --text:     #e8eaf2;
+  --text2:    #a0a8c2;
+  --text3:    #5a6180;
+
+  --blue:     #5c9cff;
+  --purple:   #a77bff;
+  --amber:    #f5a845;
+  --red:      #ff6a6a;
+  --green:    #3dd98a;
+  --cyan:     #3dd8d8;
+  --pink:     #e872c0;
+
+  /* Semantic: input=green, W=purple, bias=amber, output=blue */
+  --c-input:  #3dd98a;
+  --c-weight: #a77bff;
+  --c-bias:   #f5a845;
+  --c-output: #5c9cff;
+
+  --mono: 'JetBrains Mono', 'Menlo', monospace;
+  --sans: 'Inter', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+/* ═══ Layout ═══ */
+header {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg2), var(--bg));
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.brand {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--blue);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+.p-blue   { color: var(--blue);   border-color: rgba(92,156,255,0.4);   background: rgba(92,156,255,0.08); }
+.p-purple { color: var(--purple); border-color: rgba(167,123,255,0.4);  background: rgba(167,123,255,0.08); }
+.p-amber  { color: var(--amber);  border-color: rgba(245,168,69,0.4);   background: rgba(245,168,69,0.08); }
+.p-green  { color: var(--green);  border-color: rgba(61,217,138,0.4);   background: rgba(61,217,138,0.08); }
+
+.container {
+  padding: 24px 32px 80px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ═══ Layer selector tabs ═══ */
+.layer-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  overflow-x: auto;
+}
+.layer-tab {
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text3);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 7px;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.layer-tab:hover { background: var(--bg3); color: var(--text2); }
+.layer-tab.active {
+  background: var(--bg4);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border2);
+}
+.layer-tab .tab-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--text3);
+}
+.layer-tab.active .tab-label { color: var(--blue); }
+.layer-tab .tab-math {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ═══ Controls row ═══ */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+.ctl-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.btn {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: var(--bg4);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg3); border-color: var(--blue); color: var(--blue); }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.btn-primary:hover { background: #7ab0ff; color: #fff; }
+.btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+/* Neuron selector */
+.neuron-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.neuron-picker label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+.neuron-picker input[type=number] {
+  width: 70px;
+  padding: 5px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.neuron-picker input[type=number]:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+/* Speed */
+.speed-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.speed-ctl input[type=range] {
+  accent-color: var(--blue);
+  width: 100px;
+}
+.speed-val {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blue);
+  min-width: 50px;
+}
+
+/* ═══ Shape diagram card ═══ */
+.shape-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.shape-diagram {
+  display: grid;
+  grid-template-columns: auto auto auto auto auto auto auto auto auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  overflow-x: auto;
+  padding: 8px 0;
+}
+.shape-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid;
+  min-width: 80px;
+}
+.shape-box .sh-name { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+.shape-box .sh-shape { font-size: 13px; font-weight: 600; margin-top: 2px; }
+.shape-box .sh-size { font-size: 9px; color: var(--text3); margin-top: 3px; letter-spacing: 0.05em; text-transform: uppercase; }
+
+.sh-input  { color: var(--c-input);  border-color: rgba(61,217,138,0.5);  background: rgba(61,217,138,0.1); }
+.sh-input .sh-shape { color: var(--c-input); }
+.sh-weight { color: var(--c-weight); border-color: rgba(167,123,255,0.5); background: rgba(167,123,255,0.1); }
+.sh-weight .sh-shape { color: var(--c-weight); }
+.sh-bias   { color: var(--c-bias);   border-color: rgba(245,168,69,0.5);  background: rgba(245,168,69,0.1); }
+.sh-bias .sh-shape { color: var(--c-bias); }
+.sh-output { color: var(--c-output); border-color: rgba(92,156,255,0.5);  background: rgba(92,156,255,0.1); }
+.sh-output .sh-shape { color: var(--c-output); }
+
+.sh-op {
+  color: var(--text3);
+  font-size: 18px;
+  font-weight: 400;
+  padding: 0 2px;
+}
+
+/* Equation row */
+.equation-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text2);
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.eq-token { padding: 3px 8px; border-radius: 4px; }
+.eq-x { background: rgba(61,217,138,0.15); color: var(--c-input); }
+.eq-w { background: rgba(167,123,255,0.15); color: var(--c-weight); }
+.eq-b { background: rgba(245,168,69,0.15); color: var(--c-bias); }
+.eq-z { background: rgba(92,156,255,0.15); color: var(--c-output); }
+
+/* ═══ Matrix visualization ═══ */
+.matmul-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.card-head {
+  padding: 14px 18px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.card-head h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+.card-head .head-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* Scrollable matrix viz */
+.matmul-body {
+  padding: 24px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* The big W · x + b = z diagram */
+.matmul-viz {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: min-content;
+  padding: 20px 10px;
+}
+.mv-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-align: center;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+.mv-label .sub {
+  font-size: 9px;
+  color: var(--text3);
+  display: block;
+  margin-top: 2px;
+}
+.mv-label.lbl-w { color: var(--c-weight); }
+.mv-label.lbl-x { color: var(--c-input); }
+.mv-label.lbl-b { color: var(--c-bias); }
+.mv-label.lbl-z { color: var(--c-output); }
+
+.mv-op {
+  font-family: var(--mono);
+  font-size: 22px;
+  color: var(--text3);
+  align-self: center;
+  padding-top: 22px;
+  flex: 0 0 auto;
+}
+
+/* Matrix containers */
+.mat-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mat-grid {
+  display: grid;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+  gap: 1px;
+  position: relative;
+}
+.mat-cell {
+  width: 10px;
+  height: 10px;
+  background: var(--bg4);
+  border-radius: 1px;
+  transition: all 0.15s;
+  cursor: pointer;
+  position: relative;
+}
+.mat-cell:hover { transform: scale(1.8); z-index: 5; box-shadow: 0 0 8px var(--blue); }
+
+/* Highlight: selected row/column in matrix */
+.mat-cell.row-active {
+  box-shadow: inset 0 0 0 2px var(--amber);
+}
+.mat-cell.col-active {
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+.mat-cell.row-active.col-active {
+  box-shadow: inset 0 0 0 2px var(--red);
+  z-index: 3;
+}
+.mat-cell.pulsing {
+  animation: matPulse 0.6s ease;
+}
+@keyframes matPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(2.2); box-shadow: 0 0 12px var(--red); z-index: 10; }
+  100% { transform: scale(1); }
+}
+
+.mat-shape {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+
+/* Vector layouts */
+.vec-grid-col {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.vec-grid-col .mat-cell {
+  width: 24px;
+  height: 10px;
+}
+
+/* ═══ Dot-product walkthrough ═══ */
+.dotprod-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.dotprod-body {
+  padding: 20px;
+}
+.dotprod-header {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.dotprod-header .idx-badge {
+  color: var(--amber);
+}
+
+.dotprod-compute {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.9;
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.dp-line {
+  display: grid;
+  grid-template-columns: 50px 80px 22px 80px 22px 110px 22px 110px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.dp-line:hover { background: var(--bg4); }
+.dp-line.running { background: rgba(245,168,69,0.12); }
+.dp-line.done { opacity: 0.55; }
+
+.dp-idx { color: var(--text3); font-size: 10px; }
+.dp-w { color: var(--c-weight); }
+.dp-x { color: var(--c-input); }
+.dp-prod { color: var(--cyan); }
+.dp-acc { color: var(--c-output); }
+.dp-eq { color: var(--text3); text-align: center; }
+
+.dp-summary {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c-output);
+  border-radius: 6px;
+  padding: 14px 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.dp-summary .sum-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px dashed var(--border);
+  padding: 4px 0;
+}
+.dp-summary .sum-row:last-child { border-bottom: none; padding-top: 10px; border-top: 1px solid var(--border2); }
+.dp-summary .sum-row .k { color: var(--text3); font-size: 11px; }
+.dp-summary .sum-row .v { color: var(--text); font-size: 13px; }
+.dp-summary .final { color: var(--c-output); font-weight: 600; font-size: 15px; }
+.dp-summary .final-relu { color: var(--green); font-weight: 600; font-size: 15px; }
+
+/* ═══ Output neuron list ═══ */
+.outputs-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.outputs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 4px;
+  padding: 14px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.out-neuron {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+.out-neuron:hover { border-color: var(--blue); transform: translateY(-1px); }
+.out-neuron.selected {
+  background: rgba(245,168,69,0.2);
+  border-color: var(--amber);
+  box-shadow: 0 0 6px rgba(245,168,69,0.4);
+}
+.out-neuron .on-idx { font-size: 9px; color: var(--text3); display: block; }
+.out-neuron .on-val { font-size: 11px; font-weight: 600; }
+.out-neuron .on-val.pos { color: var(--green); }
+.out-neuron .on-val.neg { color: var(--red); }
+.out-neuron .on-val.zero { color: var(--text3); }
+.out-neuron .on-name { font-size: 9px; color: var(--text3); margin-top: 2px; }
+
+/* ═══ Hover tooltip ═══ */
+.tip {
+  position: fixed;
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 999;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  min-width: 180px;
+}
+.tip.show { display: block; }
+.tip .t-title { color: var(--blue); font-weight: 600; margin-bottom: 4px; }
+.tip .t-row { display: flex; justify-content: space-between; gap: 12px; }
+.tip .t-row .k { color: var(--text3); }
+.tip .t-row .v { color: var(--text); }
+
+/* ═══ Layer journey overview ═══ */
+.journey {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+.j-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 10px;
+  border-radius: 8px;
+  min-width: 140px;
+}
+.j-stage .j-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.j-stage .j-shape {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.j-stage .j-desc {
+  font-size: 11px;
+  color: var(--text3);
+}
+.j-arrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-weight);
+  text-align: center;
+  padding: 4px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.j-arrow .arr-main {
+  display: block;
+  font-weight: 600;
+  color: var(--blue);
+  font-size: 11px;
+}
+.j-arrow .arr-sub {
+  font-size: 9px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+@media (max-width: 1000px) {
+  .journey { grid-template-columns: 1fr; }
+  .j-arrow { transform: rotate(90deg); margin: 4px 0; }
+}
+
+/* ═══ Help text ═══ */
+.help {
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.6;
+  margin-top: 10px;
+}
+.help code {
+  background: var(--bg3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--cyan);
+}
+
+/* Legend */
+.legend {
+  display: flex;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  padding: 8px 14px;
+  background: var(--bg3);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-sq {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* Sample input display */
+.input-display {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 14px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  line-height: 1.8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.input-chip {
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: var(--c-input);
+}
+.input-chip.highlighted {
+  border-color: var(--amber);
+  background: rgba(245,168,69,0.15);
+  color: var(--amber);
+}
+
+</style>
+</head>
+<body>
+
+<!-- ══════════════ HEADER ══════════════ -->
+<header>
+  <div class="brand">MAC·VIZ <span style="color:var(--text3);font-weight:400;margin-left:6px;">/ forward-pass mechanics</span></div>
+  <div class="pills">
+    <span class="pill p-blue">40 → 96 → 42 → 4</span>
+    <span class="pill p-purple">BF16 MAC</span>
+    <span class="pill p-green">8,182 weights</span>
+    <span class="pill p-amber">ReLU × 2</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ══════════════ JOURNEY OVERVIEW ══════════════ -->
+  <!-- Big-picture map of all three matrix multiplications -->
+  <div class="journey">
+    <div class="j-stage" style="background:rgba(61,217,138,0.08);">
+      <div class="j-label" style="color:var(--c-input);">Input</div>
+      <div class="j-shape">x · (40,)</div>
+      <div class="j-desc">40 scaled features</div>
+    </div>
+    <div class="j-arrow">
+      <span class="arr-main">W₁ · x + b₁</span>
+      <span class="arr-sub">(96,40) · (40,) + (96,) → ReLU</span>
+    </div>
+    <div class="j-stage" style="background:rgba(167,123,255,0.08);">
+      <div class="j-label" style="color:var(--purple);">h₁</div>
+      <div class="j-shape">(96,)</div>
+      <div class="j-desc">after ReLU</div>
+    </div>
+    <div class="j-arrow">
+      <span class="arr-main">W₂ · h₁ + b₂</span>
+      <span class="arr-sub">(42,96) · (96,) + (42,) → ReLU</span>
+    </div>
+    <div class="j-stage" style="background:rgba(245,168,69,0.08);">
+      <div class="j-label" style="color:var(--amber);">h₂</div>
+      <div class="j-shape">(42,)</div>
+      <div class="j-desc">after ReLU</div>
+    </div>
+    <div class="j-arrow">
+      <span class="arr-main">W₃ · h₂ + b₃</span>
+      <span class="arr-sub">(4,42) · (42,) + (4,) · no ReLU</span>
+    </div>
+    <div class="j-stage" style="background:rgba(92,156,255,0.08);">
+      <div class="j-label" style="color:var(--blue);">logits</div>
+      <div class="j-shape">(4,)</div>
+      <div class="j-desc">argmax → class</div>
+    </div>
+  </div>
+
+  <!-- ══════════════ LAYER SELECTOR ══════════════ -->
+  <div class="layer-tabs">
+    <button class="layer-tab active" data-layer="1" onclick="selectLayer(1)">
+      <span class="tab-label">LAYER 1</span>
+      <span class="tab-math">W₁·x + b₁ → ReLU</span>
+      <span style="font-size:10px;color:var(--text3);margin-top:2px;">(96,40)·(40)+(96) = 96 MACs × 40 terms</span>
+    </button>
+    <button class="layer-tab" data-layer="2" onclick="selectLayer(2)">
+      <span class="tab-label">LAYER 2</span>
+      <span class="tab-math">W₂·h₁ + b₂ → ReLU</span>
+      <span style="font-size:10px;color:var(--text3);margin-top:2px;">(42,96)·(96)+(42) = 42 MACs × 96 terms</span>
+    </button>
+    <button class="layer-tab" data-layer="3" onclick="selectLayer(3)">
+      <span class="tab-label">LAYER 3</span>
+      <span class="tab-math">W₃·h₂ + b₃</span>
+      <span style="font-size:10px;color:var(--text3);margin-top:2px;">(4,42)·(42)+(4) = 4 MACs × 42 terms</span>
+    </button>
+  </div>
+
+  <!-- ══════════════ CONTROLS ══════════════ -->
+  <div class="controls">
+    <span class="ctl-label">Preset</span>
+    <button class="btn" onclick="loadSample('dos')">DoS</button>
+    <button class="btn" onclick="loadSample('normal')">NORMAL</button>
+    <button class="btn" onclick="loadSample('ci')">c_ci_na_1</button>
+    <button class="btn" onclick="loadSample('se')">c_se_na_1</button>
+    <button class="btn" onclick="loadSample('random')">Random</button>
+
+    <div style="border-left:1px solid var(--border);height:24px;margin:0 6px;"></div>
+
+    <div class="neuron-picker">
+      <label>Output neuron:</label>
+      <input type="number" id="outIdx" min="0" value="0" onchange="onNeuronChange()">
+      <span id="outMax" style="font-family:var(--mono);font-size:10px;color:var(--text3);">/ 95</span>
+    </div>
+
+    <div style="border-left:1px solid var(--border);height:24px;margin:0 6px;"></div>
+
+    <button class="btn btn-primary" onclick="animateDotProduct()">▶ Animate MAC</button>
+
+    <div class="speed-ctl">
+      <span class="ctl-label">Speed</span>
+      <input type="range" id="speedSlider" min="5" max="200" step="5" value="50" oninput="onSpeedChange(this.value)">
+      <span class="speed-val" id="speedVal">50ms</span>
+    </div>
+  </div>
+
+  <!-- ══════════════ SHAPE DIAGRAM ══════════════ -->
+  <div class="shape-card">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);letter-spacing:0.05em;text-transform:uppercase;margin-bottom:14px;">
+      Shape diagram · <span id="shapeLayerName" style="color:var(--blue);">Layer 1</span>
+    </div>
+    <div class="shape-diagram" id="shapeDiagram"></div>
+    <div class="equation-row">
+      <span class="eq-token eq-z">z<sub id="eqZSub">[o]</sub></span>
+      <span>=</span>
+      <span class="eq-token" style="color:var(--text3);">Σᵢ</span>
+      <span class="eq-token eq-w">W<sub id="eqWSub">[o,i]</sub></span>
+      <span>·</span>
+      <span class="eq-token eq-x">x<sub id="eqXSub">[i]</sub></span>
+      <span>+</span>
+      <span class="eq-token eq-b">b<sub id="eqBSub">[o]</sub></span>
+      <span style="color:var(--text3);" id="eqReluNote"> · then ReLU</span>
+    </div>
+  </div>
+
+  <!-- ══════════════ MATRIX VIZ ══════════════ -->
+  <div class="matmul-card">
+    <div class="card-head">
+      <h3>Matrix multiplication visualisation</h3>
+      <span class="head-meta" id="matmulMeta">W₁ (96×40) · x (40) + b₁ (96) = z₁ (96)</span>
+    </div>
+    <div class="matmul-body">
+      <div class="matmul-viz" id="matmulViz"></div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-sq" style="background:rgba(245,168,69,0.5);border:1px solid var(--amber);"></span>Selected row (output neuron)</span>
+      <span class="legend-item"><span class="legend-sq" style="background:rgba(92,156,255,0.5);border:1px solid var(--blue);"></span>Selected column</span>
+      <span class="legend-item"><span class="legend-sq" style="background:rgba(61,217,138,0.8);"></span>Positive weight/value</span>
+      <span class="legend-item"><span class="legend-sq" style="background:rgba(255,106,106,0.8);"></span>Negative weight/value</span>
+    </div>
+  </div>
+
+  <!-- ══════════════ INPUT VALUES DISPLAY ══════════════ -->
+  <div class="matmul-card">
+    <div class="card-head">
+      <h3><span id="inputLabel">Input x</span> values</h3>
+      <span class="head-meta" id="inputMeta"></span>
+    </div>
+    <div class="matmul-body" style="padding: 14px 18px;">
+      <div class="input-display" id="inputDisplay"></div>
+      <div class="help">
+        These are the <span id="inputHelpLabel">40 scaled feature values</span> entering the current layer.
+        The highlighted chip matches the current column (input index) during MAC animation.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ DOT-PRODUCT WALKTHROUGH ══════════════ -->
+  <div class="dotprod-card">
+    <div class="card-head">
+      <h3>MAC walkthrough · single output neuron</h3>
+      <span class="head-meta" id="dpMeta"></span>
+    </div>
+    <div class="dotprod-body">
+      <div class="dotprod-header" id="dpHeader">
+        z[<span class="idx-badge" id="dpOutIdx">0</span>] = bias + Σᵢ W[<span class="idx-badge" id="dpOutIdx2">0</span>, i] · x[i]
+      </div>
+      <div class="dotprod-compute" id="dpCompute"></div>
+      <div class="dp-summary" id="dpSummary"></div>
+      <div class="help">
+        Each line is one BF16 <b>multiply-accumulate</b> (MAC): the weight column <code>W[o,i]</code>
+        times the input <code>x[i]</code>, added into the running accumulator. Every partial product
+        and every partial sum is rounded to BF16 — matching the hardware MAC exactly.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ ALL OUTPUTS OF THIS LAYER ══════════════ -->
+  <div class="outputs-card">
+    <div class="card-head">
+      <h3>All outputs of this layer (click to inspect)</h3>
+      <span class="head-meta" id="outsMeta"></span>
+    </div>
+    <div class="outputs-list" id="outputsList"></div>
+  </div>
+
+</div>
+
+<div class="tip" id="tip">
+  <div class="t-title" id="tipTitle"></div>
+  <div id="tipBody"></div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   PART 2 — JS logic
+   Key data:
+     - model.w1 (96×40), model.b1 (96)
+     - model.w2 (42×96), model.b2 (42)
+     - model.w3 (4×42),  model.b3 (4)
+   Forward pass is BF16-rounded on every multiply and every add.
+   ═══════════════════════════════════════════════════════════════════ */
+
+// ── Model constants ────────────────────────────────────────────────
+const N_FEAT = 40, H1 = 96, H2 = 42, N_CLS = 4;
+const CLASS_NAMES = ['DoS', 'NORMAL', 'c_ci_na_1', 'c_se_na_1'];
+const FEAT_NAMES = [
+  'flow IAT max', 'cot_frac_0', 'flow duration', 'fw IAT tot', 'bw IAT tot',
+  'type_frac_2', 'cot_frac_1', 'flow APDU max', 'fw IAT max', 'bw IAT max',
+  'flow IAT mean', 'fw IAT mean', 'bw IAT mean', 'flow IAT std', 'fw IAT std',
+  'bw IAT std', 'cot_frac_2', 'type_frac_0', 'flow pkts/s', 'flow bytes/s',
+  'fw pkts/s', 'bw pkts/s', 'total fw pkts', 'total bw pkts', 'SYN flags',
+  'RST flags', 'ACK flags', 'init fw win', 'init bw win', 'fw APDU mean',
+  'bw APDU mean', 'flow APDU mean', 'down/up ratio', 'fw bytes/bulk', 'bw bytes/bulk',
+  'active mean', 'idle mean', 'bw subflow', 'fw TCP hdr', 'type_frac_1'
+];
+
+// ── BF16 helpers ───────────────────────────────────────────────────
+/* Convert float32 → BF16 word (16 bits, upper half of f32) */
+function floatToBF16(f) {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, f, false);
+  return new DataView(buf).getUint16(0, false);
+}
+/* BF16 word → float32 */
+function bf16ToFloat(w) {
+  const buf = new ArrayBuffer(4);
+  const dv = new DataView(buf);
+  dv.setUint16(0, w & 0xFFFF, false);
+  return dv.getFloat32(0, false);
+}
+/* Round a float to the nearest BF16 representable value */
+function bf16Round(f) { return bf16ToFloat(floatToBF16(f)); }
+/* Pretty-print BF16 hex */
+function bf16Hex(w) { return '0x' + w.toString(16).toUpperCase().padStart(4, '0'); }
+
+// ── Weight initialization (Xavier, seeded) ─────────────────────────
+let model = { w1: null, b1: null, w2: null, b2: null, w3: null, b3: null };
+
+function initWeights(seed = 7) {
+  let s = seed >>> 0;
+  function rand() {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function normal() {
+    const u = rand() || 1e-9, v = rand() || 1e-9;
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function make(nIn, nOut, wScale) {
+    const w = new Float32Array(nOut * nIn);
+    const b = new Float32Array(nOut);
+    for (let i = 0; i < w.length; i++) w[i] = bf16Round(normal() * wScale);
+    for (let i = 0; i < b.length; i++) b[i] = bf16Round(normal() * 0.05);
+    return { w, b };
+  }
+  const l1 = make(N_FEAT, H1, Math.sqrt(2/N_FEAT));
+  const l2 = make(H1, H2, Math.sqrt(2/H1));
+  const l3 = make(H2, N_CLS, Math.sqrt(2/H2));
+  model.w1 = l1.w; model.b1 = l1.b;
+  model.w2 = l2.w; model.b2 = l2.b;
+  model.w3 = l3.w; model.b3 = l3.b;
+}
+
+// ── State ──────────────────────────────────────────────────────────
+let state = {
+  input:   new Float32Array(N_FEAT),   // current layer's input
+  h1: null, h2: null, logits: null,
+  preH1: null, preH2: null,
+  currentLayer: 1,
+  currentOutIdx: 0,
+  animSpeed: 50,
+  animTimer: null
+};
+
+// ── Forward pass (BF16) ────────────────────────────────────────────
+function bf16MatVec(x, W, b, outDim, inDim) {
+  const out = new Float32Array(outDim);
+  for (let o = 0; o < outDim; o++) {
+    let acc = bf16Round(b[o]);
+    for (let i = 0; i < inDim; i++) {
+      const prod = bf16Round(bf16Round(W[o*inDim + i]) * bf16Round(x[i]));
+      acc = bf16Round(acc + prod);
+    }
+    out[o] = bf16Round(acc);
+  }
+  return out;
+}
+function relu(a) {
+  const o = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = bf16Round(Math.max(0, a[i]));
+  return o;
+}
+function forwardPass(x) {
+  state.preH1  = bf16MatVec(x,      model.w1, model.b1, H1, N_FEAT);
+  state.h1     = relu(state.preH1);
+  state.preH2  = bf16MatVec(state.h1, model.w2, model.b2, H2, H1);
+  state.h2     = relu(state.preH2);
+  state.logits = bf16MatVec(state.h2, model.w3, model.b3, N_CLS, H2);
+}
+
+// ── Get the current layer's W, b, input, pre-activation, output ────
+function currentLayer() {
+  if (state.currentLayer === 1) {
+    return {
+      W: model.w1, b: model.b1,
+      x: state.input,
+      pre: state.preH1,
+      inDim: N_FEAT, outDim: H1,
+      inLabel: 'x', outLabel: 'z₁',
+      inNames: FEAT_NAMES,
+      hasRelu: true,
+      title: 'Layer 1: Linear(40→96) → ReLU',
+      shape: '(96, 40) · (40,) + (96,) = (96,)'
+    };
+  } else if (state.currentLayer === 2) {
+    return {
+      W: model.w2, b: model.b2,
+      x: state.h1,
+      pre: state.preH2,
+      inDim: H1, outDim: H2,
+      inLabel: 'h₁', outLabel: 'z₂',
+      inNames: null,
+      hasRelu: true,
+      title: 'Layer 2: Linear(96→42) → ReLU',
+      shape: '(42, 96) · (96,) + (42,) = (42,)'
+    };
+  } else {
+    return {
+      W: model.w3, b: model.b3,
+      x: state.h2,
+      pre: state.logits,
+      inDim: H2, outDim: N_CLS,
+      inLabel: 'h₂', outLabel: 'z₃ (logits)',
+      inNames: CLASS_NAMES,
+      hasRelu: false,
+      title: 'Layer 3: Linear(42→4)',
+      shape: '(4, 42) · (42,) + (4,) = (4,)'
+    };
+  }
+}
+
+// ── Sample inputs ──────────────────────────────────────────────────
+const SAMPLES = {
+  dos:    [2.8,-1.5, 2.1,-0.8, 1.9, 0.0, 0.0, 0.5, 2.1, 1.7, 0.8, 0.7, 0.6,-0.3,-0.2,-0.1,-0.5,-0.2, 2.6, 2.4, 1.8, 1.6, 2.5,-1.2, 0.4, 0.7, 1.2, 0.3, 0.1, 0.5, 0.3, 0.4, 0.9,-0.1, 0.0, 0.8,-0.5, 0.9, 0.8,-0.4],
+  normal: [0.1, 0.0, 0.2,-0.1, 0.1, 0.0, 0.0,-0.2, 0.2, 0.1,-0.1, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.1, 0.1,-0.2,-0.3, 0.0, 0.0, 0.2, 0.1, 0.1, 0.0,-0.1, 0.0, 0.0, 0.1, 0.1, 0.4, 0.5, 0.2, 0.2, 0.0],
+  ci:     [0.3, 2.2,-0.2,-0.1,-0.1, 0.5, 2.0, 1.8,-0.2,-0.3,-0.1,-0.2,-0.1, 0.2, 0.1, 0.1, 2.1, 1.6, 0.4, 0.5, 0.3, 0.3,-0.3,-0.2, 0.0, 0.0, 0.5, 0.4, 0.3, 0.8, 0.7, 0.8, 0.3, 0.2, 0.1, 0.3, 0.4, 0.2, 0.3, 0.5],
+  se:     [0.2, 0.9, 0.6, 1.5, 1.3, 2.1, 0.8, 2.3, 1.2, 1.0, 0.7, 0.8, 0.7, 0.4, 0.3, 0.3, 0.4, 0.3, 0.6, 0.8, 0.5, 0.5, 0.4, 0.3, 0.0, 0.0, 0.7, 0.5, 0.4, 1.0, 1.1, 1.0, 0.5, 0.4, 0.3, 0.3, 0.2, 0.3, 0.3, 1.9]
+};
+function loadSample(name) {
+  if (name === 'random') {
+    for (let i = 0; i < N_FEAT; i++) state.input[i] = parseFloat((Math.random()*4-2).toFixed(2));
+  } else {
+    const p = SAMPLES[name] || SAMPLES.normal;
+    for (let i = 0; i < N_FEAT; i++) state.input[i] = p[i];
+  }
+  forwardPass(state.input);
+  render();
+}
+
+// ── Rendering helpers ──────────────────────────────────────────────
+function colorForValue(v, maxAbs) {
+  if (v === 0 || !isFinite(v)) return 'var(--bg4)';
+  const intensity = Math.min(1, Math.abs(v) / (maxAbs || 1));
+  const alpha = 0.15 + intensity * 0.75;
+  return v > 0
+    ? `rgba(61,217,138,${alpha})`
+    : `rgba(255,106,106,${alpha})`;
+}
+function classForVal(v) { return v > 0.001 ? 'pos' : v < -0.001 ? 'neg' : 'zero'; }
+
+// ── Shape diagram ──────────────────────────────────────────────────
+function renderShapeDiagram() {
+  const L = currentLayer();
+  const el = document.getElementById('shapeDiagram');
+  const wShape = `(${L.outDim}, ${L.inDim})`;
+  const xShape = `(${L.inDim},)`;
+  const bShape = `(${L.outDim},)`;
+  const zShape = `(${L.outDim},)`;
+
+  el.innerHTML = `
+    <div class="shape-box sh-weight">
+      <span class="sh-name">W${state.currentLayer}</span>
+      <span class="sh-shape">${wShape}</span>
+      <span class="sh-size">${L.outDim * L.inDim} weights</span>
+    </div>
+    <span class="sh-op">·</span>
+    <div class="shape-box sh-input">
+      <span class="sh-name">${L.inLabel}</span>
+      <span class="sh-shape">${xShape}</span>
+      <span class="sh-size">${L.inDim} values</span>
+    </div>
+    <span class="sh-op">+</span>
+    <div class="shape-box sh-bias">
+      <span class="sh-name">b${state.currentLayer}</span>
+      <span class="sh-shape">${bShape}</span>
+      <span class="sh-size">${L.outDim} values</span>
+    </div>
+    <span class="sh-op">=</span>
+    <div class="shape-box sh-output">
+      <span class="sh-name">${L.outLabel}</span>
+      <span class="sh-shape">${zShape}</span>
+      <span class="sh-size">${L.outDim} values</span>
+    </div>
+  `;
+
+  document.getElementById('shapeLayerName').textContent = `Layer ${state.currentLayer}`;
+  document.getElementById('eqZSub').textContent = `[${state.currentOutIdx}]`;
+  document.getElementById('eqWSub').textContent = `[${state.currentOutIdx},i]`;
+  document.getElementById('eqXSub').textContent = `[i]`;
+  document.getElementById('eqBSub').textContent = `[${state.currentOutIdx}]`;
+  document.getElementById('eqReluNote').style.display = L.hasRelu ? 'inline' : 'none';
+}
+
+// ── Matrix grid visualization ──────────────────────────────────────
+function renderMatmulViz() {
+  const L = currentLayer();
+  const viz = document.getElementById('matmulViz');
+  const meta = document.getElementById('matmulMeta');
+  meta.textContent = L.shape;
+
+  // Compute max abs across W, x, b, z for consistent color scaling
+  let maxW = 0, maxX = 0, maxB = 0, maxZ = 0;
+  for (let i = 0; i < L.W.length; i++) maxW = Math.max(maxW, Math.abs(L.W[i]));
+  for (let i = 0; i < L.x.length; i++) maxX = Math.max(maxX, Math.abs(L.x[i]));
+  for (let i = 0; i < L.b.length; i++) maxB = Math.max(maxB, Math.abs(L.b[i]));
+  if (L.pre) for (let i = 0; i < L.pre.length; i++) maxZ = Math.max(maxZ, Math.abs(L.pre[i]));
+
+  // Adjust cell sizes depending on matrix dimensions so it fits nicely
+  const cellSize = L.currentLayer === 3 ? 18 : (L.inDim >= 96 ? 6 : 9);
+  const gap = L.inDim >= 96 ? 1 : 1;
+
+  // Weight matrix: rows = outDim, cols = inDim
+  let wHtml = `<div class="mat-container">`;
+  wHtml += `<div class="mv-label lbl-w">W${state.currentLayer}<span class="sub">(${L.outDim} × ${L.inDim})</span></div>`;
+  wHtml += `<div class="mat-grid" id="wGrid" style="grid-template-columns: repeat(${L.inDim}, ${cellSize}px); gap:${gap}px;">`;
+  for (let r = 0; r < L.outDim; r++) {
+    for (let c = 0; c < L.inDim; c++) {
+      const v = L.W[r * L.inDim + c];
+      const bg = colorForValue(v, maxW);
+      const active = r === state.currentOutIdx ? 'row-active' : '';
+      wHtml += `<div class="mat-cell ${active}" data-r="${r}" data-c="${c}" data-type="w"
+                     style="width:${cellSize}px;height:${cellSize}px;background:${bg};"></div>`;
+    }
+  }
+  wHtml += `</div>`;
+  wHtml += `<div class="mat-shape">${L.outDim} × ${L.inDim}</div>`;
+  wHtml += `</div>`;
+
+  // Input vector x (column)
+  let xHtml = `<div class="mat-container">`;
+  xHtml += `<div class="mv-label lbl-x">${L.inLabel}<span class="sub">(${L.inDim},)</span></div>`;
+  xHtml += `<div class="mat-grid" id="xGrid" style="grid-template-columns: ${cellSize}px; gap:${gap}px;">`;
+  for (let i = 0; i < L.inDim; i++) {
+    const v = L.x[i];
+    const bg = colorForValue(v, maxX);
+    xHtml += `<div class="mat-cell" data-r="${i}" data-type="x"
+                   style="width:${cellSize}px;height:${cellSize}px;background:${bg};"></div>`;
+  }
+  xHtml += `</div>`;
+  xHtml += `<div class="mat-shape">${L.inDim} × 1</div>`;
+  xHtml += `</div>`;
+
+  // Bias vector b (column, outDim)
+  const bCellSize = L.currentLayer === 3 ? 18 : 9;
+  let bHtml = `<div class="mat-container">`;
+  bHtml += `<div class="mv-label lbl-b">b${state.currentLayer}<span class="sub">(${L.outDim},)</span></div>`;
+  bHtml += `<div class="mat-grid" id="bGrid" style="grid-template-columns: ${bCellSize}px; gap:${gap}px;">`;
+  for (let i = 0; i < L.outDim; i++) {
+    const v = L.b[i];
+    const bg = colorForValue(v, maxB);
+    const active = i === state.currentOutIdx ? 'row-active' : '';
+    bHtml += `<div class="mat-cell ${active}" data-r="${i}" data-type="b"
+                   style="width:${bCellSize}px;height:${bCellSize}px;background:${bg};"></div>`;
+  }
+  bHtml += `</div>`;
+  bHtml += `<div class="mat-shape">${L.outDim} × 1</div>`;
+  bHtml += `</div>`;
+
+  // Output vector z (column, outDim)
+  let zHtml = `<div class="mat-container">`;
+  zHtml += `<div class="mv-label lbl-z">${L.outLabel}<span class="sub">(${L.outDim},)</span></div>`;
+  zHtml += `<div class="mat-grid" id="zGrid" style="grid-template-columns: ${bCellSize}px; gap:${gap}px;">`;
+  for (let i = 0; i < L.outDim; i++) {
+    const v = L.pre ? L.pre[i] : 0;
+    const bg = colorForValue(v, maxZ);
+    const active = i === state.currentOutIdx ? 'row-active' : '';
+    zHtml += `<div class="mat-cell ${active}" data-r="${i}" data-type="z"
+                   style="width:${bCellSize}px;height:${bCellSize}px;background:${bg};"></div>`;
+  }
+  zHtml += `</div>`;
+  zHtml += `<div class="mat-shape">${L.outDim} × 1</div>`;
+  zHtml += `</div>`;
+
+  viz.innerHTML = wHtml +
+    `<div class="mv-op">·</div>` + xHtml +
+    `<div class="mv-op">+</div>` + bHtml +
+    `<div class="mv-op">=</div>` + zHtml;
+
+  // Attach hover for cells → tooltip
+  viz.querySelectorAll('.mat-cell').forEach(cell => {
+    cell.addEventListener('mouseenter', onCellHover);
+    cell.addEventListener('mouseleave', hideTip);
+    cell.addEventListener('click', onCellClick);
+  });
+}
+
+function onCellHover(e) {
+  const c = e.currentTarget;
+  const type = c.dataset.type;
+  const r = parseInt(c.dataset.r);
+  const col = c.dataset.c ? parseInt(c.dataset.c) : null;
+  const L = currentLayer();
+  let title = '', rows = [];
+
+  if (type === 'w') {
+    const v = L.W[r * L.inDim + col];
+    title = `W${state.currentLayer}[${r}, ${col}]`;
+    rows.push(['value', v.toFixed(6)]);
+    rows.push(['BF16 hex', bf16Hex(floatToBF16(v))]);
+  } else if (type === 'x') {
+    const v = L.x[r];
+    title = `${L.inLabel}[${r}]`;
+    if (L.inNames) rows.push(['name', L.inNames[r] || '']);
+    rows.push(['value', v.toFixed(6)]);
+    rows.push(['BF16 hex', bf16Hex(floatToBF16(v))]);
+  } else if (type === 'b') {
+    const v = L.b[r];
+    title = `b${state.currentLayer}[${r}]`;
+    rows.push(['value', v.toFixed(6)]);
+    rows.push(['BF16 hex', bf16Hex(floatToBF16(v))]);
+  } else if (type === 'z') {
+    const v = L.pre[r];
+    title = `${L.outLabel}[${r}]`;
+    rows.push(['pre-ReLU', v.toFixed(6)]);
+    if (L.hasRelu) rows.push(['post-ReLU', Math.max(0, v).toFixed(6)]);
+    rows.push(['BF16 hex', bf16Hex(floatToBF16(v))]);
+  }
+  showTip(e, title, rows);
+}
+function onCellClick(e) {
+  const c = e.currentTarget;
+  const type = c.dataset.type;
+  if (type === 'w' || type === 'b' || type === 'z') {
+    // Click on a row → change selected output neuron
+    const r = parseInt(c.dataset.r);
+    state.currentOutIdx = r;
+    document.getElementById('outIdx').value = r;
+    render();
+  } else if (type === 'x') {
+    // Click on an input element → animate that single MAC term
+    const i = parseInt(c.dataset.r);
+    highlightMACTerm(i);
+  }
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────
+const tip = document.getElementById('tip');
+function showTip(e, title, rows) {
+  document.getElementById('tipTitle').textContent = title;
+  document.getElementById('tipBody').innerHTML = rows.map(([k, v]) =>
+    `<div class="t-row"><span class="k">${k}</span><span class="v">${v}</span></div>`
+  ).join('');
+  tip.classList.add('show');
+  const rect = tip.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - rect.width - 12, e.clientX + 12);
+  const y = Math.min(window.innerHeight - rect.height - 12, e.clientY + 12);
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+function hideTip() { tip.classList.remove('show'); }
+
+// ── Input values display ───────────────────────────────────────────
+function renderInputDisplay() {
+  const L = currentLayer();
+  const el = document.getElementById('inputDisplay');
+  const labelEl = document.getElementById('inputLabel');
+  const helpEl = document.getElementById('inputHelpLabel');
+  const metaEl = document.getElementById('inputMeta');
+  labelEl.textContent = `Input ${L.inLabel}`;
+  helpEl.textContent = `${L.inDim} ${state.currentLayer === 1 ? 'scaled feature values' : 'hidden activations'}`;
+  metaEl.textContent = `${L.inDim} elements · range [${Math.min(...L.x).toFixed(3)}, ${Math.max(...L.x).toFixed(3)}]`;
+
+  let html = '';
+  for (let i = 0; i < L.inDim; i++) {
+    const v = L.x[i];
+    html += `<span class="input-chip" data-idx="${i}" id="ic-${i}" title="${L.inNames ? L.inNames[i] || ('#'+i) : '#'+i}">
+      [${i}] ${v.toFixed(3)}
+    </span>`;
+  }
+  el.innerHTML = html;
+}
+
+// ── Dot-product walkthrough ────────────────────────────────────────
+function renderDotProduct() {
+  const L = currentLayer();
+  const o = state.currentOutIdx;
+  const inDim = L.inDim;
+
+  document.getElementById('dpOutIdx').textContent = o;
+  document.getElementById('dpOutIdx2').textContent = o;
+  document.getElementById('dpMeta').textContent =
+    `Layer ${state.currentLayer} · output neuron ${o} · ${inDim} MAC terms`;
+
+  // Compute the running accumulator for display purposes (static, non-animated version)
+  const bias = L.b[o];
+  let acc = bf16Round(bias);
+
+  let lines = '';
+  for (let i = 0; i < inDim; i++) {
+    const w = L.W[o * inDim + i];
+    const x = L.x[i];
+    const prod = bf16Round(bf16Round(w) * bf16Round(x));
+    acc = bf16Round(acc + prod);
+    lines += `<div class="dp-line" id="dpl-${i}">
+      <span class="dp-idx">i=${i.toString().padStart(2,'0')}</span>
+      <span class="dp-w">${w.toFixed(3)}</span>
+      <span class="dp-eq">×</span>
+      <span class="dp-x">${x.toFixed(3)}</span>
+      <span class="dp-eq">=</span>
+      <span class="dp-prod">${prod.toFixed(4)}</span>
+      <span class="dp-eq">⇒ acc</span>
+      <span class="dp-acc">${acc.toFixed(4)}</span>
+    </div>`;
+  }
+  document.getElementById('dpCompute').innerHTML = lines;
+
+  const preActV = L.pre ? L.pre[o] : 0;
+  const postReluV = L.hasRelu ? Math.max(0, preActV) : preActV;
+
+  let summary = `
+    <div class="sum-row"><span class="k">Bias b${state.currentLayer}[${o}]</span><span class="v">${bias.toFixed(5)}</span></div>
+    <div class="sum-row"><span class="k">Sum of products (${inDim} MAC terms)</span><span class="v">${(preActV - bias).toFixed(5)}</span></div>
+    <div class="sum-row"><span class="k">Pre-activation z = bias + sum</span><span class="v final">${preActV.toFixed(5)}</span></div>
+  `;
+  if (L.hasRelu) {
+    summary += `<div class="sum-row"><span class="k">After ReLU = max(0, z)</span><span class="v final-relu">${postReluV.toFixed(5)}</span></div>`;
+  } else {
+    // For output layer, show softmax context
+    summary += `<div class="sum-row"><span class="k">Class</span><span class="v" style="color:var(--blue);font-weight:600;">${CLASS_NAMES[o]}</span></div>`;
+  }
+  document.getElementById('dpSummary').innerHTML = summary;
+}
+
+// ── Animate the MAC for the selected output neuron ────────────────
+function animateDotProduct() {
+  if (state.animTimer) {
+    clearInterval(state.animTimer);
+    state.animTimer = null;
+  }
+  const L = currentLayer();
+  const o = state.currentOutIdx;
+  const inDim = L.inDim;
+
+  // Reset opacity
+  document.querySelectorAll('.dp-line').forEach(l => l.classList.remove('running', 'done'));
+  document.querySelectorAll('.input-chip').forEach(c => c.classList.remove('highlighted'));
+  document.querySelectorAll('.mat-cell').forEach(c => c.classList.remove('col-active', 'pulsing'));
+
+  let i = 0;
+  state.animTimer = setInterval(() => {
+    // Clear previous "running" marker
+    document.querySelectorAll('.dp-line.running').forEach(l => {
+      l.classList.remove('running');
+      l.classList.add('done');
+    });
+    document.querySelectorAll('.input-chip.highlighted').forEach(c => c.classList.remove('highlighted'));
+    document.querySelectorAll('.mat-cell.col-active').forEach(c => c.classList.remove('col-active'));
+    document.querySelectorAll('.mat-cell.pulsing').forEach(c => c.classList.remove('pulsing'));
+
+    if (i >= inDim) {
+      clearInterval(state.animTimer);
+      state.animTimer = null;
+      return;
+    }
+
+    // Mark current line
+    const line = document.getElementById('dpl-' + i);
+    if (line) {
+      line.classList.add('running');
+      line.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    // Highlight input chip
+    const chip = document.getElementById('ic-' + i);
+    if (chip) chip.classList.add('highlighted');
+
+    // Highlight matrix cells: W[o,i] and x[i] and z[o]
+    const wCell = document.querySelector(`.mat-cell[data-type="w"][data-r="${o}"][data-c="${i}"]`);
+    const xCell = document.querySelector(`.mat-cell[data-type="x"][data-r="${i}"]`);
+    const zCell = document.querySelector(`.mat-cell[data-type="z"][data-r="${o}"]`);
+    if (wCell) { wCell.classList.add('col-active', 'pulsing'); }
+    if (xCell) { xCell.classList.add('col-active', 'pulsing'); }
+    if (zCell) { zCell.classList.add('pulsing'); }
+
+    i++;
+  }, state.animSpeed);
+}
+
+function highlightMACTerm(i) {
+  const o = state.currentOutIdx;
+  const line = document.getElementById('dpl-' + i);
+  if (line) {
+    document.querySelectorAll('.dp-line.running').forEach(l => l.classList.remove('running'));
+    line.classList.add('running');
+    line.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  document.querySelectorAll('.input-chip.highlighted').forEach(c => c.classList.remove('highlighted'));
+  const chip = document.getElementById('ic-' + i);
+  if (chip) chip.classList.add('highlighted');
+}
+
+// ── Outputs list (click any to inspect) ────────────────────────────
+function renderOutputsList() {
+  const L = currentLayer();
+  const el = document.getElementById('outputsList');
+  const metaEl = document.getElementById('outsMeta');
+  metaEl.textContent = `${L.outDim} output neurons · selected: ${state.currentOutIdx}`;
+
+  let html = '';
+  for (let i = 0; i < L.outDim; i++) {
+    const pre = L.pre ? L.pre[i] : 0;
+    const post = L.hasRelu ? Math.max(0, pre) : pre;
+    const name = L.inNames && state.currentLayer === 3 ? CLASS_NAMES[i] : '';
+    const selected = i === state.currentOutIdx ? 'selected' : '';
+    const displayVal = L.hasRelu ? post : pre;
+    html += `<div class="out-neuron ${selected}" onclick="setOutIdx(${i})">
+      <span class="on-idx">#${i}</span>
+      <span class="on-val ${classForVal(displayVal)}">${displayVal.toFixed(3)}</span>
+      ${name ? `<span class="on-name">${name}</span>` : ''}
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function setOutIdx(i) {
+  state.currentOutIdx = i;
+  document.getElementById('outIdx').value = i;
+  render();
+}
+
+// ── UI glue ────────────────────────────────────────────────────────
+function selectLayer(n) {
+  if (state.animTimer) { clearInterval(state.animTimer); state.animTimer = null; }
+  state.currentLayer = n;
+  state.currentOutIdx = 0;
+  document.querySelectorAll('.layer-tab').forEach(t =>
+    t.classList.toggle('active', parseInt(t.dataset.layer) === n)
+  );
+  const L = currentLayer();
+  document.getElementById('outMax').textContent = `/ ${L.outDim - 1}`;
+  document.getElementById('outIdx').value = 0;
+  document.getElementById('outIdx').max = L.outDim - 1;
+  render();
+}
+
+function onNeuronChange() {
+  const L = currentLayer();
+  let v = parseInt(document.getElementById('outIdx').value);
+  if (isNaN(v) || v < 0) v = 0;
+  if (v >= L.outDim) v = L.outDim - 1;
+  state.currentOutIdx = v;
+  document.getElementById('outIdx').value = v;
+  render();
+}
+
+function onSpeedChange(v) {
+  state.animSpeed = parseInt(v);
+  document.getElementById('speedVal').textContent = v + 'ms';
+}
+
+function render() {
+  renderShapeDiagram();
+  renderMatmulViz();
+  renderInputDisplay();
+  renderDotProduct();
+  renderOutputsList();
+}
+
+// ── Init ───────────────────────────────────────────────────────────
+initWeights();
+loadSample('normal');
+selectLayer(1);
+</script>
+</body>
+</html>

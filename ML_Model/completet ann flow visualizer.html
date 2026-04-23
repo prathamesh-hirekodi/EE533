@@ -1,0 +1,1935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEC104 BF16 ANN · End-to-end Visualizer</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   Design tokens: dark, high-contrast. Tweak the CSS vars below to retheme.
+   ══════════════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #0b0d12;
+  --bg2: #121520;
+  --bg3: #1a1e2c;
+  --bg4: #232838;
+  --border: #2a3047;
+  --border2: #394063;
+  --text: #e8eaf0;
+  --text2: #a0a8c2;
+  --text3: #606780;
+
+  --accent: #5c9cff;
+  --accent2: #a77bff;
+  --green:  #3dd98a;
+  --amber:  #f7a845;
+  --red:    #ff6a6a;
+  --cyan:   #3ddbdb;
+  --pink:   #e872c0;
+
+  --input-c:  #3dd98a;
+  --h1-c:     #a77bff;
+  --h2-c:     #f7a845;
+  --out-c:    #ff6a6a;
+
+  --mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+/* ─── Scrollbars ─── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ═══════════ LAYOUT ═══════════ */
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+header {
+  background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.brand {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.brand small {
+  color: var(--text3);
+  font-weight: 400;
+  margin-left: 8px;
+}
+.title-pills {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.pill-blue   { color: var(--accent);   border-color: rgba(92,156,255,0.4);  background: rgba(92,156,255,0.08); }
+.pill-purple { color: var(--accent2);  border-color: rgba(167,123,255,0.4); background: rgba(167,123,255,0.08); }
+.pill-green  { color: var(--green);    border-color: rgba(61,217,138,0.4);  background: rgba(61,217,138,0.08); }
+.pill-amber  { color: var(--amber);    border-color: rgba(247,168,69,0.4);  background: rgba(247,168,69,0.08); }
+.pill-cyan   { color: var(--cyan);     border-color: rgba(61,219,219,0.4);  background: rgba(61,219,219,0.08); }
+
+.container { padding: 24px 32px 60px; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+/* ═══════════ PIPELINE FLOW (top bar) ═══════════ */
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 4px 16px;
+  margin-bottom: 20px;
+}
+.stage {
+  flex: 1 0 auto;
+  min-width: 140px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.stage:hover { border-color: var(--accent); transform: translateY(-1px); }
+.stage.active {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(92,156,255,0.12), rgba(167,123,255,0.08));
+  box-shadow: 0 0 0 1px var(--accent), 0 8px 24px rgba(92,156,255,0.15);
+}
+.stage-idx {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+}
+.stage-name {
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+.stage-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-arrow {
+  color: var(--border2);
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+/* ═══════════ GRID ═══════════ */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+@media (max-width: 1000px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+
+/* ═══════════ CARDS ═══════════ */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-family: var(--mono);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.icon-green  { background: rgba(61,217,138,0.18);  color: var(--green); }
+.icon-blue   { background: rgba(92,156,255,0.18);  color: var(--accent); }
+.icon-purple { background: rgba(167,123,255,0.18); color: var(--accent2); }
+.icon-amber  { background: rgba(247,168,69,0.18);  color: var(--amber); }
+.icon-red    { background: rgba(255,106,106,0.18); color: var(--red); }
+.icon-cyan   { background: rgba(61,219,219,0.18);  color: var(--cyan); }
+
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text2);
+  flex: 1;
+}
+.card-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+}
+.card-body { padding: 16px; flex: 1; }
+.card-body.pad-sm { padding: 12px; }
+
+/* ═══════════ INPUT SLIDERS ═══════════ */
+.feature-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.feat-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg3);
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.feat-row:hover { border-color: var(--border2); }
+.feat-idx {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  min-width: 22px;
+}
+.feat-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feat-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+input[type=range] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 4px;
+  width: 90px;
+}
+.feat-val {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  min-width: 40px;
+  text-align: right;
+}
+.feat-val.iec104 {
+  position: relative;
+}
+.feat-val.iec104::before {
+  content: '104';
+  position: absolute;
+  left: -28px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 8px;
+  color: var(--pink);
+  background: rgba(232,114,192,0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+
+/* ═══════════ BUTTONS ═══════════ */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.btn {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border2);
+  background: var(--bg4);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg3); border-color: var(--accent); color: var(--accent); }
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: #7ab0ff; border-color: #7ab0ff; color: #fff; }
+
+/* ═══════════ NETWORK CANVAS ═══════════ */
+.net-wrap {
+  width: 100%;
+  overflow-x: auto;
+  padding: 8px 0;
+}
+canvas#netCanvas {
+  display: block;
+  margin: 0 auto;
+}
+
+/* ═══════════ FEATURE SELECTION VIZ ═══════════ */
+.feat-sel-viz {
+  display: grid;
+  grid-template-columns: 1fr 60px 1fr;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.feat-sel-col {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.feat-sel-col-title {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.feat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px;
+  background: var(--accent);
+}
+.feat-line {
+  display: flex;
+  align-items: center;
+  padding: 2px 0;
+  color: var(--text2);
+}
+.feat-line.selected {
+  color: var(--amber);
+}
+.feat-line.selected .feat-dot {
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(247,168,69,0.5);
+}
+.feat-arrow-col {
+  text-align: center;
+  color: var(--accent);
+  font-size: 18px;
+}
+
+/* ═══════════ ACTIVATION GRIDS ═══════════ */
+.act-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.act-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.act-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+.act-grid {
+  display: grid;
+  gap: 3px;
+  padding: 4px;
+  background: var(--bg3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+.act-grid-h1 { grid-template-columns: repeat(16, 1fr); }
+.act-grid-h2 { grid-template-columns: repeat(14, 1fr); }
+.act-grid-out { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+.act-cell {
+  aspect-ratio: 1;
+  min-height: 16px;
+  border-radius: 2px;
+  background: var(--bg4);
+  border: 1px solid transparent;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.act-cell.active { animation: pulse 0.4s ease; }
+@keyframes pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.3); box-shadow: 0 0 8px currentColor; }
+  100% { transform: scale(1); }
+}
+.act-cell:hover {
+  border-color: var(--accent);
+  transform: scale(1.15);
+  z-index: 2;
+}
+
+.act-grid-out .act-cell {
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text);
+  padding: 6px 4px;
+  border-radius: var(--r-sm);
+  gap: 3px;
+}
+.act-grid-out .act-cell.winner {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px rgba(247,168,69,0.35);
+}
+.act-cell .oc-name { font-size: 9px; opacity: 0.7; }
+.act-cell .oc-val  { font-size: 11px; font-weight: 500; }
+.act-cell .oc-prob { font-size: 9px; color: var(--amber); }
+
+/* ═══════════ LAYER EXPLAINER ═══════════ */
+.layer-eq {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.layer-eq .eq-label {
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.layer-eq .eq-formula {
+  color: var(--cyan);
+  margin-bottom: 6px;
+}
+.layer-eq .eq-desc {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+/* ═══════════ DMEM MAP ═══════════ */
+.dmem-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.dmem-thread {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px;
+}
+.dmem-thread-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.dmem-bar {
+  height: 220px;
+  background: var(--bg4);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.dmem-seg {
+  width: 100%;
+  display: block;
+  position: relative;
+  cursor: pointer;
+  transition: filter 0.2s;
+}
+.dmem-seg:hover { filter: brightness(1.3); }
+.dmem-seg-label {
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text);
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.seg-fc1w  { background: linear-gradient(180deg, #5c9cff, #4a82d4); }
+.seg-fc1b  { background: linear-gradient(180deg, #3dd98a, #32b071); }
+.seg-fc2w  { background: linear-gradient(180deg, #a77bff, #8961d4); }
+.seg-fc2b  { background: linear-gradient(180deg, #f7a845, #d48c33); }
+.seg-fc3w  { background: linear-gradient(180deg, #e872c0, #c05aa0); }
+.seg-fc3b  { background: linear-gradient(180deg, #3ddbdb, #2db8b8); }
+.seg-pad   { background: repeating-linear-gradient(45deg, #2a3047 0, #2a3047 4px, #1a1e2c 4px, #1a1e2c 8px); }
+
+.dmem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 10px;
+  font-family: var(--mono);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text2);
+}
+.legend-sq {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* ═══════════ BF16 INSPECTOR ═══════════ */
+.bf16-inspector {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.bf16-bits {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+.bit-group { display: flex; gap: 1px; }
+.bit {
+  width: 18px; height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  border: 1px solid;
+  border-radius: 2px;
+}
+.bit-sign { background: rgba(255,106,106,0.15); border-color: rgba(255,106,106,0.4); color: var(--red); }
+.bit-exp  { background: rgba(247,168,69,0.15); border-color: rgba(247,168,69,0.4); color: var(--amber); }
+.bit-frac { background: rgba(92,156,255,0.15); border-color: rgba(92,156,255,0.4); color: var(--accent); }
+.bit.off { opacity: 0.3; }
+.bit-sep { color: var(--border2); padding: 0 3px; font-size: 14px; }
+
+.bf16-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.bf16-table td {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.bf16-table td:first-child {
+  color: var(--text3);
+  width: 35%;
+}
+.bf16-table td:last-child {
+  color: var(--text);
+  text-align: right;
+}
+.bf16-hex-val { color: var(--cyan) !important; }
+
+/* ═══════════ WEIGHT HEATMAP ═══════════ */
+.wmap-wrap {
+  margin-top: 10px;
+}
+.wmap-canvas {
+  display: block;
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.wmap-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.wmap-tab {
+  font-size: 10px;
+  font-family: var(--mono);
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text3);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wmap-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* ═══════════ FORWARD PASS WALKTHROUGH ═══════════ */
+.walkthrough {
+  background: linear-gradient(135deg, rgba(92,156,255,0.06), rgba(167,123,255,0.06));
+  border: 1px solid rgba(92,156,255,0.25);
+  border-radius: var(--r-lg);
+  padding: 16px;
+}
+.walkthrough-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.wt-step-num {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.wt-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+.wt-body {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.7;
+}
+.wt-body code {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--cyan);
+}
+.wt-body b { color: var(--text); font-weight: 500; }
+.wt-nav {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ═══════════ TOOLTIP ═══════════ */
+.tooltip {
+  position: fixed;
+  z-index: 999;
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  font-size: 11px;
+  pointer-events: none;
+  display: none;
+  max-width: 280px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  font-family: var(--mono);
+}
+.tooltip.show { display: block; }
+.tooltip-title { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.tooltip-body { color: var(--text2); line-height: 1.5; }
+
+/* ═══════════ MISC ═══════════ */
+.help-text {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.mono { font-family: var(--mono); }
+.text-accent { color: var(--accent); }
+.text-amber  { color: var(--amber); }
+.text-green  { color: var(--green); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<header>
+  <div class="brand">BF16·ANN <small>/ IEC104 traffic classifier</small></div>
+  <div class="title-pills">
+    <span class="pill pill-blue">40 → 96 → 42 → 4</span>
+    <span class="pill pill-purple">ReLU × 2</span>
+    <span class="pill pill-green">8,182 BF16 params</span>
+    <span class="pill pill-amber">4 × 2048 DMEM</span>
+    <span class="pill pill-cyan">LightGBM KD</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- ═══════════════════════ PIPELINE TOP BAR ═══════════════════════ -->
+  <!-- Horizontal left-to-right flow of the whole pipeline. Click a stage
+       to scroll to the corresponding card below. -->
+  <div class="pipeline" id="pipelineBar">
+    <div class="stage" data-scroll="card-input">
+      <div class="stage-idx">01</div>
+      <div class="stage-name">Raw input</div>
+      <div class="stage-meta">~131 features</div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage" data-scroll="card-scaler">
+      <div class="stage-idx">02</div>
+      <div class="stage-name">StandardScaler</div>
+      <div class="stage-meta">(x − μ) / σ</div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage" data-scroll="card-featsel">
+      <div class="stage-idx">03</div>
+      <div class="stage-name">LightGBM select</div>
+      <div class="stage-meta">131 → 40</div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage" data-scroll="card-net">
+      <div class="stage-idx">04</div>
+      <div class="stage-name">ANN forward</div>
+      <div class="stage-meta">BF16 MACs</div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage" data-scroll="card-output">
+      <div class="stage-idx">05</div>
+      <div class="stage-name">Logits → argmax</div>
+      <div class="stage-meta">4 classes</div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage" data-scroll="card-dmem">
+      <div class="stage-idx">06</div>
+      <div class="stage-name">DMEM export</div>
+      <div class="stage-meta">4 × 2048 words</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ CONTROL ROW ═══════════════════════ -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 16px;">
+      <div style="font-size:12px;color:var(--text3);font-family:var(--mono);">presets</div>
+      <button class="btn" onclick="loadPreset('dos')">▶ DoS attack</button>
+      <button class="btn" onclick="loadPreset('normal')">▶ Normal IEC104</button>
+      <button class="btn" onclick="loadPreset('ci')">▶ C_CI_NA_1 (interrogation)</button>
+      <button class="btn" onclick="loadPreset('se')">▶ C_SE_NA_1 (setpoint)</button>
+      <button class="btn" onclick="randomizeInputs()">⟳ Random</button>
+      <button class="btn" onclick="resetInputs()">↻ Zero</button>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-primary" id="btnAutoRun" onclick="toggleAutoRun()">● Live update: ON</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ ROW 1: input + scaler + feat select ═══════════════════════ -->
+  <div class="grid-3">
+
+    <!-- INPUT: raw features with sliders -->
+    <div class="card" id="card-input">
+      <div class="card-header">
+        <div class="card-icon icon-green">01</div>
+        <div class="card-title">Raw input features</div>
+        <div class="card-badge">40 shown</div>
+      </div>
+      <div class="card-body">
+        <div class="help-text">
+          Move a slider to change a feature value. IEC104-specific fields are tagged <span class="text-accent">104</span>.
+          Changes flow through the entire pipeline live if "Live update" is on.
+        </div>
+        <div class="feature-list" id="featureList"></div>
+      </div>
+    </div>
+
+    <!-- SCALER -->
+    <div class="card" id="card-scaler">
+      <div class="card-header">
+        <div class="card-icon icon-blue">02</div>
+        <div class="card-title">StandardScaler</div>
+      </div>
+      <div class="card-body">
+        <div class="layer-eq">
+          <div class="eq-label">Formula</div>
+          <div class="eq-formula">x̂ = (x − μ) / σ</div>
+          <div class="eq-desc">
+            Per-feature z-score normalization. The scaler's μ (mean) and σ (std) are
+            saved as <code>scaler_mean.npy</code> / <code>scaler_std.npy</code> at
+            training time and applied before the network sees any input.
+          </div>
+        </div>
+        <div class="act-header">
+          <div class="act-label">Scaled x̂</div>
+          <div class="act-meta" id="scalerMeta">— · —</div>
+        </div>
+        <div class="act-grid" style="grid-template-columns:repeat(10,1fr);" id="scaledGrid"></div>
+      </div>
+    </div>
+
+    <!-- FEATURE SELECTION -->
+    <div class="card" id="card-featsel">
+      <div class="card-header">
+        <div class="card-icon icon-purple">03</div>
+        <div class="card-title">LightGBM feature selection</div>
+        <div class="card-badge">top 40</div>
+      </div>
+      <div class="card-body">
+        <div class="help-text" style="margin-bottom:10px;">
+          A 300-tree LightGBM teacher ranks all features by gain-weighted split frequency.
+          Top 40 → <code style="background:var(--bg3);padding:1px 4px;border-radius:3px;font-size:10px;">feat_idx.npy</code> → ANN input.
+        </div>
+        <div class="feat-sel-viz">
+          <div class="feat-sel-col">
+            <div class="feat-sel-col-title">All features (~131)</div>
+            <div id="allFeatsCol"></div>
+          </div>
+          <div class="feat-arrow-col">
+            →<br><small style="font-size:8px;color:var(--text3);">top-k</small>
+          </div>
+          <div class="feat-sel-col">
+            <div class="feat-sel-col-title">Selected (40)</div>
+            <div id="selFeatsCol"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════ ROW 2: ANN diagram + activations ═══════════════════════ -->
+  <div class="card" id="card-net" style="margin-bottom:20px;">
+    <div class="card-header">
+      <div class="card-icon icon-amber">04</div>
+      <div class="card-title">ANN forward pass</div>
+      <div class="card-badge">Linear → ReLU → Linear → ReLU → Linear</div>
+    </div>
+    <div class="card-body">
+      <div class="net-wrap">
+        <canvas id="netCanvas" width="1100" height="340"></canvas>
+      </div>
+      <div class="help-text">
+        Neuron fill intensity = activation magnitude. Green = positive, red = negative.
+        Edge thickness = weight magnitude, color = sign. Hover a neuron for details.
+      </div>
+
+      <!-- Activation grids per hidden layer -->
+      <div style="margin-top:20px;">
+
+        <!-- Hidden layer 1 -->
+        <div class="layer-eq" style="border-left-color: var(--h1-c);">
+          <div class="eq-label">Hidden layer 1 · Linear(40→96) → ReLU</div>
+          <div class="eq-formula">h₁ = ReLU( W₁ · x̂ + b₁ )</div>
+          <div class="eq-desc">
+            Each of 96 hidden units computes a weighted sum of all 40 scaled inputs plus a bias.
+            ReLU zeroes negative pre-activations — dead cells are flagged in red. Typical healthy
+            ReLU layer runs <b>30–60% zero</b>; much higher and capacity is wasted.
+          </div>
+        </div>
+        <div class="act-header">
+          <div class="act-label">h₁ activations (96 units)</div>
+          <div class="act-meta" id="h1Meta">—</div>
+        </div>
+        <div class="act-grid act-grid-h1" id="h1Grid"></div>
+
+        <!-- Hidden layer 2 -->
+        <div class="layer-eq" style="margin-top:16px;border-left-color: var(--h2-c);">
+          <div class="eq-label">Hidden layer 2 · Linear(96→42) → ReLU</div>
+          <div class="eq-formula">h₂ = ReLU( W₂ · h₁ + b₂ )</div>
+          <div class="eq-desc">
+            The second hidden layer recombines layer-1 features into 42 higher-level traffic signatures.
+            Each unit sees all 96 h₁ outputs and applies another BF16-rounded MAC.
+          </div>
+        </div>
+        <div class="act-header">
+          <div class="act-label">h₂ activations (42 units)</div>
+          <div class="act-meta" id="h2Meta">—</div>
+        </div>
+        <div class="act-grid act-grid-h2" id="h2Grid"></div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════ ROW 3: output + weight heatmap ═══════════════════════ -->
+  <div class="grid-2">
+
+    <div class="card" id="card-output">
+      <div class="card-header">
+        <div class="card-icon icon-red">05</div>
+        <div class="card-title">Output logits &amp; prediction</div>
+        <div class="card-badge">argmax</div>
+      </div>
+      <div class="card-body">
+        <div class="layer-eq" style="border-left-color: var(--out-c);">
+          <div class="eq-label">Output layer · Linear(42→4)</div>
+          <div class="eq-formula">z₃ = W₃ · h₂ + b₃</div>
+          <div class="eq-desc">
+            The output layer has <b>no ReLU</b> — logits need full real-number range.
+            Softmax below is shown for interpretability; hardware does <code>argmax</code>
+            over the raw logits.
+          </div>
+        </div>
+
+        <div class="act-header">
+          <div class="act-label">Logits z₃ (4 classes)</div>
+          <div class="act-meta" id="outMeta">—</div>
+        </div>
+        <div class="act-grid act-grid-out" id="outGrid"></div>
+
+        <div style="margin-top:14px;padding:12px;background:var(--bg3);border-radius:var(--r-sm);">
+          <div style="font-size:10px;color:var(--text3);letter-spacing:0.06em;text-transform:uppercase;">Prediction</div>
+          <div style="font-size:20px;font-weight:500;margin-top:4px;" id="predName">—</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px;font-family:var(--mono);" id="predConf">softmax confidence: —</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BF16 weight inspector -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-cyan">BF</div>
+        <div class="card-title">BF16 weight inspector</div>
+        <div class="card-badge" id="wmapBadge">fc1.weight · (96,40)</div>
+      </div>
+      <div class="card-body">
+        <div class="wmap-tabs">
+          <button class="wmap-tab active" onclick="setWeightLayer('fc1', this)">fc1.weight</button>
+          <button class="wmap-tab" onclick="setWeightLayer('fc2', this)">fc2.weight</button>
+          <button class="wmap-tab" onclick="setWeightLayer('fc3', this)">fc3.weight</button>
+        </div>
+        <canvas id="wmapCanvas" class="wmap-canvas" width="540" height="220"></canvas>
+        <div class="help-text">Click a pixel to inspect its BF16 bit layout.</div>
+
+        <div class="bf16-inspector" style="margin-top:12px;" id="bf16Inspector">
+          <div style="color:var(--text3);font-size:11px;">Click a weight cell above to see its BF16 bits.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════ ROW 4: DMEM map + walkthrough ═══════════════════════ -->
+  <div class="grid-2">
+
+    <div class="card" id="card-dmem">
+      <div class="card-header">
+        <div class="card-icon icon-amber">06</div>
+        <div class="card-title">DMEM memory map</div>
+        <div class="card-badge">8,192 words total</div>
+      </div>
+      <div class="card-body">
+        <div class="help-text" style="margin-bottom:12px;">
+          Four 2048×16-bit DMEM lanes. Each GPU thread reads one <code style="background:var(--bg3);padding:1px 4px;border-radius:3px;font-size:10px;">ann_weights_dmem_tN.hex</code>
+          via SystemVerilog <code style="background:var(--bg3);padding:1px 4px;border-radius:3px;font-size:10px;">$readmemh</code> at reset.
+          Segments are packed strictly left-to-right in export order.
+        </div>
+        <div class="dmem-grid" id="dmemGrid"></div>
+        <div class="dmem-legend">
+          <span class="legend-item"><span class="legend-sq seg-fc1w"></span>fc1.weight</span>
+          <span class="legend-item"><span class="legend-sq seg-fc1b"></span>fc1.bias</span>
+          <span class="legend-item"><span class="legend-sq seg-fc2w"></span>fc2.weight</span>
+          <span class="legend-item"><span class="legend-sq seg-fc2b"></span>fc2.bias</span>
+          <span class="legend-item"><span class="legend-sq seg-fc3w"></span>fc3.weight</span>
+          <span class="legend-item"><span class="legend-sq seg-fc3b"></span>fc3.bias</span>
+          <span class="legend-item"><span class="legend-sq seg-pad"></span>zero pad</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Walkthrough -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-blue">→</div>
+        <div class="card-title">Single-sample walkthrough</div>
+      </div>
+      <div class="card-body">
+        <div class="walkthrough" id="walkthrough">
+          <div class="walkthrough-head">
+            <div class="wt-step-num" id="wtNum">1</div>
+            <div class="wt-title" id="wtTitle">Load input</div>
+          </div>
+          <div class="wt-body" id="wtBody">
+            A 40-dim vector of scaled features enters the network. Values are standardized
+            to roughly zero mean, unit variance. Use the sliders to the left to modify them.
+          </div>
+          <div class="wt-nav">
+            <button class="btn" onclick="wtPrev()">← Prev</button>
+            <button class="btn" onclick="wtNext()">Next →</button>
+            <div style="margin-left:auto;font-size:10px;color:var(--text3);font-family:var(--mono);align-self:center;" id="wtCounter">1 / 6</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div> <!-- /container -->
+</div> <!-- /app -->
+
+<!-- Tooltip for hover details -->
+<div class="tooltip" id="tooltip">
+  <div class="tooltip-title" id="ttTitle"></div>
+  <div class="tooltip-body" id="ttBody"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     PART 2 — JAVASCRIPT
+     All logic is vanilla JS, commented for extensibility.
+     Main state: `model` (weights), `state` (forward-pass values), `ui` (UI prefs).
+     ══════════════════════════════════════════════════════════════════════ -->
+<script>
+// ════════════════ CONSTANTS ════════════════
+const N_FEAT = 40, H1 = 96, H2 = 42, N_CLS = 4;
+const DMEM_DEPTH = 2048, N_THREADS = 4, DMEM_TOTAL = DMEM_DEPTH * N_THREADS;
+const CLASS_NAMES  = ['DoS', 'NORMAL', 'c_ci_na_1', 'c_se_na_1'];
+const CLASS_COLORS = ['#ff6a6a', '#3dd98a', '#5c9cff', '#f7a845'];
+
+// Top-40 feature names (from training script: LightGBM-selected + engineered)
+// IEC104-specific ones are tagged below.
+const FEAT_NAMES = [
+  'flow IAT max', 'cot_frac_0', 'flow duration', 'fw IAT tot', 'bw IAT tot',
+  'type_frac_2', 'cot_frac_1', 'flow pkt APDU max', 'fw IAT max', 'bw IAT max',
+  'flow IAT mean', 'fw IAT mean', 'bw IAT mean', 'flow IAT std', 'fw IAT std',
+  'bw IAT std', 'cot_frac_2', 'type_frac_0', 'flow pkts/s', 'flow bytes/s',
+  'fw pkts/s', 'bw pkts/s', 'total fw pkts', 'total bw pkts', 'SYN flag cnt',
+  'RST flag cnt', 'ACK flag cnt', 'init fw win bytes', 'init bw win bytes',
+  'fw APDU len mean', 'bw APDU len mean', 'flow APDU len mean', 'down/up ratio',
+  'fw avg bytes/bulk', 'bw avg bytes/bulk', 'active time mean', 'idle time mean',
+  'bw subflow pkts', 'fw TCP hdr len', 'type_frac_1'
+];
+// Indexes (into FEAT_NAMES) of IEC104-specific features that carry the "104" tag.
+const IEC104_TAGS = new Set([1, 5, 6, 7, 16, 17, 29, 30, 31, 39]);
+
+// ════════════════ STATE ════════════════
+const model = {
+  // Random BF16 weights generated on first run. Replace in `loadRealWeights()`
+  // if you want to feed in actual hex-file contents.
+  w1: null, b1: null,
+  w2: null, b2: null,
+  w3: null, b3: null,
+  scalerMean: new Float32Array(N_FEAT),   // identity by default
+  scalerStd:  new Float32Array(N_FEAT).fill(1)
+};
+const state = {
+  rawInput:  new Float32Array(N_FEAT),
+  scaledInput: new Float32Array(N_FEAT),
+  preH1: null, h1: null,
+  preH2: null, h2: null,
+  logits: null, probs: null
+};
+const ui = {
+  autoRun: true,
+  currentWeightLayer: 'fc1',
+  walkthroughStep: 0,
+  selectedWeight: null
+};
+
+// ════════════════ BF16 HELPERS ════════════════
+// BF16 = upper 16 bits of IEEE 754 float32.
+// sign(1) | exponent(8) | mantissa(7)
+function floatToBF16(f) {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, f, false);   // big-endian
+  return new DataView(buf).getUint16(0, false); // upper 2 bytes
+}
+function bf16ToFloat(word) {
+  const buf = new ArrayBuffer(4);
+  const dv = new DataView(buf);
+  dv.setUint16(0, word & 0xFFFF, false);
+  dv.setUint16(2, 0, false);
+  return dv.getFloat32(0, false);
+}
+// Round a float32 to the nearest BF16-representable value.
+function bf16Round(f) { return bf16ToFloat(floatToBF16(f)); }
+function bf16Hex(word) { return word.toString(16).toUpperCase().padStart(4, '0'); }
+function bf16Parts(word) {
+  return {
+    sign: (word >> 15) & 1,
+    exp:  (word >> 7)  & 0xFF,
+    frac:  word        & 0x7F
+  };
+}
+
+// ════════════════ WEIGHT INITIALIZATION ════════════════
+// Xavier-like init, rounded to BF16 to mirror hardware precision.
+// Replace this with real weights loaded from hex files if available.
+function initRandomWeights(seed = 42) {
+  // Deterministic Mulberry32 PRNG so the same page refresh gives the same model.
+  let s = seed >>> 0;
+  function rand() {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function normal() {  // Box-Muller
+    const u = rand() || 1e-9;
+    const v = rand() || 1e-9;
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function makeLayer(nIn, nOut, weightScale) {
+    const w = new Float32Array(nOut * nIn);
+    const b = new Float32Array(nOut);
+    for (let i = 0; i < w.length; i++) w[i] = bf16Round(normal() * weightScale);
+    for (let i = 0; i < b.length; i++) b[i] = bf16Round(normal() * 0.02);
+    return { w, b };
+  }
+  // Xavier/He scales
+  const l1 = makeLayer(N_FEAT, H1, Math.sqrt(2 / N_FEAT));
+  const l2 = makeLayer(H1,     H2, Math.sqrt(2 / H1));
+  const l3 = makeLayer(H2,     N_CLS, Math.sqrt(2 / H2));
+  model.w1 = l1.w; model.b1 = l1.b;
+  model.w2 = l2.w; model.b2 = l2.b;
+  model.w3 = l3.w; model.b3 = l3.b;
+
+  // Bias the output layer toward class-distinctive features so presets behave sensibly.
+  // This is purely for demo UX — real trained weights will obviously differ.
+  biasOutputForDemo();
+}
+
+// Lightweight bias so presets show distinguishable logits in the demo.
+function biasOutputForDemo() {
+  // Map a few input features directly to output-class bias paths through fc2/fc3.
+  // Not rigorous — just ensures DoS/NORMAL/CI/SE presets split the logits.
+  for (let o = 0; o < N_CLS; o++) {
+    for (let i = 0; i < H2; i++) {
+      // Each output class gets a mild affinity for a ~H2/4 slice of h2.
+      const slice = Math.floor(i / (H2 / N_CLS));
+      model.w3[o * H2 + i] = bf16Round(model.w3[o * H2 + i] + (slice === o ? 0.25 : -0.05));
+    }
+  }
+}
+
+// ════════════════ FORWARD PASS ════════════════
+// BF16-rounded matmul. Mirrors how hardware computes MACs:
+// each multiply output is rounded, each addition output is rounded.
+function bf16MatVec(x, W, b, outDim, inDim) {
+  const out = new Float32Array(outDim);
+  for (let o = 0; o < outDim; o++) {
+    let acc = bf16Round(b[o]);
+    const rowOff = o * inDim;
+    for (let i = 0; i < inDim; i++) {
+      const prod = bf16Round(bf16Round(W[rowOff + i]) * bf16Round(x[i]));
+      acc = bf16Round(acc + prod);
+    }
+    out[o] = bf16Round(acc);
+  }
+  return out;
+}
+function relu(arr) {
+  const o = new Float32Array(arr.length);
+  for (let i = 0; i < arr.length; i++) o[i] = bf16Round(Math.max(0, arr[i]));
+  return o;
+}
+function softmax(logits) {
+  const m = Math.max(...logits);
+  const exps = logits.map(v => Math.exp(v - m));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map(v => v / sum);
+}
+
+function forwardPass() {
+  // 1. StandardScaler
+  for (let i = 0; i < N_FEAT; i++) {
+    state.scaledInput[i] = bf16Round(
+      (state.rawInput[i] - model.scalerMean[i]) / (model.scalerStd[i] || 1)
+    );
+  }
+  // 2. Layer 1
+  state.preH1 = bf16MatVec(state.scaledInput, model.w1, model.b1, H1, N_FEAT);
+  state.h1    = relu(state.preH1);
+  // 3. Layer 2
+  state.preH2 = bf16MatVec(state.h1, model.w2, model.b2, H2, H1);
+  state.h2    = relu(state.preH2);
+  // 4. Output layer (no ReLU — logits are unbounded real numbers)
+  state.logits = bf16MatVec(state.h2, model.w3, model.b3, N_CLS, H2);
+  state.probs  = softmax(Array.from(state.logits));
+}
+
+// ════════════════ PRESETS ════════════════
+// Each preset is a 40-long array of plausible-ish scaled values that tilts the
+// random demo model toward the named class.
+const PRESETS = {
+  dos:    [2.8,-1.5, 2.1,-0.8, 1.9, 0.0, 0.0, 0.5, 2.1, 1.7, 0.8, 0.7, 0.6,-0.3,-0.2,-0.1,-0.5,-0.2, 2.6, 2.4, 1.8, 1.6, 2.5,-1.2, 0.4, 0.7, 1.2, 0.3, 0.1, 0.5, 0.3, 0.4, 0.9,-0.1, 0.0, 0.8,-0.5, 0.9, 0.8,-0.4],
+  normal: [0.1, 0.0, 0.2,-0.1, 0.1, 0.0, 0.0,-0.2, 0.2, 0.1,-0.1, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.1, 0.1,-0.2,-0.3, 0.0, 0.0, 0.2, 0.1, 0.1, 0.0,-0.1, 0.0, 0.0, 0.1, 0.1, 0.4, 0.5, 0.2, 0.2, 0.0],
+  ci:     [0.3, 2.2,-0.2,-0.1,-0.1, 0.5, 2.0, 1.8,-0.2,-0.3,-0.1,-0.2,-0.1, 0.2, 0.1, 0.1, 2.1, 1.6, 0.4, 0.5, 0.3, 0.3,-0.3,-0.2, 0.0, 0.0, 0.5, 0.4, 0.3, 0.8, 0.7, 0.8, 0.3, 0.2, 0.1, 0.3, 0.4, 0.2, 0.3, 0.5],
+  se:     [0.2, 0.9, 0.6, 1.5, 1.3, 2.1, 0.8, 2.3, 1.2, 1.0, 0.7, 0.8, 0.7, 0.4, 0.3, 0.3, 0.4, 0.3, 0.6, 0.8, 0.5, 0.5, 0.4, 0.3, 0.0, 0.0, 0.7, 0.5, 0.4, 1.0, 1.1, 1.0, 0.5, 0.4, 0.3, 0.3, 0.2, 0.3, 0.3, 1.9]
+};
+function loadPreset(name) {
+  const p = PRESETS[name] || PRESETS.normal;
+  for (let i = 0; i < N_FEAT; i++) state.rawInput[i] = p[i];
+  syncSlidersFromState();
+  runPipeline();
+}
+function randomizeInputs() {
+  for (let i = 0; i < N_FEAT; i++) {
+    state.rawInput[i] = parseFloat((Math.random() * 4 - 2).toFixed(2));
+  }
+  syncSlidersFromState();
+  runPipeline();
+}
+function resetInputs() {
+  state.rawInput.fill(0);
+  syncSlidersFromState();
+  runPipeline();
+}
+function toggleAutoRun() {
+  ui.autoRun = !ui.autoRun;
+  const btn = document.getElementById('btnAutoRun');
+  btn.textContent = ui.autoRun ? '● Live update: ON' : '○ Live update: OFF';
+  btn.classList.toggle('btn-primary', ui.autoRun);
+  if (ui.autoRun) runPipeline();
+}
+
+// ════════════════ UI BUILDERS ════════════════
+
+// ─── Feature sliders (input card) ───
+function buildFeatureSliders() {
+  const container = document.getElementById('featureList');
+  container.innerHTML = '';
+  FEAT_NAMES.forEach((name, i) => {
+    const isIEC = IEC104_TAGS.has(i);
+    const row = document.createElement('div');
+    row.className = 'feat-row';
+    row.innerHTML = `
+      <span class="feat-idx">#${i.toString().padStart(2, '0')}</span>
+      <span class="feat-name" title="${name}">${name}${isIEC ? ' <span style="color:var(--pink);font-size:8px;">·104</span>' : ''}</span>
+      <div class="feat-slider-wrap">
+        <input type="range" min="-3" max="3" step="0.05" value="0"
+               data-idx="${i}" oninput="onSliderChange(${i}, this.value)">
+        <span class="feat-val" id="fv-${i}">0.00</span>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+function onSliderChange(idx, val) {
+  state.rawInput[idx] = parseFloat(val);
+  document.getElementById('fv-' + idx).textContent = parseFloat(val).toFixed(2);
+  if (ui.autoRun) runPipeline();
+}
+function syncSlidersFromState() {
+  for (let i = 0; i < N_FEAT; i++) {
+    const slider = document.querySelector(`input[data-idx="${i}"]`);
+    if (slider) slider.value = state.rawInput[i];
+    const valEl = document.getElementById('fv-' + i);
+    if (valEl) valEl.textContent = state.rawInput[i].toFixed(2);
+  }
+}
+
+// ─── Feature selection columns ───
+function buildFeatureSelectionViz() {
+  // Left: ~131 features (fake list showing 20-ish at a time)
+  const ALL_FEATS_SAMPLE = [
+    'flow duration', 'total fw pkts', 'total bw pkts', 'fw pkts/s', 'bw pkts/s',
+    'flow IAT max', 'flow IAT min', 'flow IAT mean', 'flow IAT std',
+    'fw IAT tot', 'fw IAT max', 'fw IAT min', 'fw IAT mean', 'fw IAT std',
+    'bw IAT tot', 'bw IAT max', 'bw IAT min', 'bw IAT mean', 'bw IAT std',
+    'fw PSH flag', 'bw PSH flag', 'fw URG flag', 'bw URG flag',
+    'SYN flag cnt', 'RST flag cnt', 'PSH flag cnt', 'ACK flag cnt', 'URG flag cnt',
+    'flow pkt APDU max', 'flow pkt APDU mean', 'flow pkt APDU std',
+    'fw APDU len max', 'fw APDU len mean', 'bw APDU len max', 'bw APDU len mean',
+    'init fw win bytes', 'init bw win bytes', 'fw TCP hdr len', 'bw TCP hdr len',
+    'fw avg bytes/bulk', 'bw avg bytes/bulk', 'fw avg bulk rate', 'bw avg bulk rate',
+    'active time mean', 'active time max', 'idle time mean', 'idle time max',
+    'cot=1', 'cot=3', 'cot=5', 'cot=6', 'cot=7', 'cot=20',
+    'type_id_30', 'type_id_36', 'type_id_45', 'type_id_100', 'type_id_103',
+    'cot_frac_0', 'cot_frac_1', 'cot_frac_2', 'cot_frac_3',
+    'type_frac_0', 'type_frac_1', 'type_frac_2',
+    'flow down/up ratio', 'flow pkts/s', 'flow bytes/s',
+    'bw subflow pkts', 'fw subflow pkts', 'fw subflow bytes', 'bw subflow bytes'
+  ];
+  const all = document.getElementById('allFeatsCol');
+  const sel = document.getElementById('selFeatsCol');
+  all.innerHTML = ''; sel.innerHTML = '';
+
+  // Mark which features from ALL_FEATS_SAMPLE are also in FEAT_NAMES (selected).
+  const selectedSet = new Set(FEAT_NAMES.map(n => n.toLowerCase()));
+
+  ALL_FEATS_SAMPLE.forEach(name => {
+    const isSelected = selectedSet.has(name.toLowerCase());
+    const div = document.createElement('div');
+    div.className = 'feat-line' + (isSelected ? ' selected' : '');
+    div.innerHTML = `<span class="feat-dot"></span>${name}`;
+    all.appendChild(div);
+  });
+
+  FEAT_NAMES.forEach((name, i) => {
+    const div = document.createElement('div');
+    div.className = 'feat-line selected';
+    div.innerHTML = `<span class="feat-dot"></span>#${i.toString().padStart(2,'0')} ${name}`;
+    sel.appendChild(div);
+  });
+}
+
+// ─── Build activation grid cells ───
+function buildActivationGrids() {
+  // Scaled-input grid
+  const scaled = document.getElementById('scaledGrid');
+  scaled.innerHTML = Array.from({length: N_FEAT}, (_, i) =>
+    `<div class="act-cell" data-tag="scaled" data-idx="${i}"></div>`
+  ).join('');
+  // h1 grid
+  const h1 = document.getElementById('h1Grid');
+  h1.innerHTML = Array.from({length: H1}, (_, i) =>
+    `<div class="act-cell" data-tag="h1" data-idx="${i}"></div>`
+  ).join('');
+  // h2 grid
+  const h2 = document.getElementById('h2Grid');
+  h2.innerHTML = Array.from({length: H2}, (_, i) =>
+    `<div class="act-cell" data-tag="h2" data-idx="${i}"></div>`
+  ).join('');
+  // output grid
+  const out = document.getElementById('outGrid');
+  out.innerHTML = CLASS_NAMES.map((name, i) => `
+    <div class="act-cell" data-tag="out" data-idx="${i}" style="border-color:${CLASS_COLORS[i]};">
+      <div class="oc-name" style="color:${CLASS_COLORS[i]}">${name}</div>
+      <div class="oc-val" id="oc-val-${i}">—</div>
+      <div class="oc-prob" id="oc-prob-${i}">—%</div>
+    </div>
+  `).join('');
+
+  // Hover tooltips
+  document.querySelectorAll('.act-cell').forEach(cell => {
+    cell.addEventListener('mouseenter', onCellHover);
+    cell.addEventListener('mouseleave', hideTooltip);
+  });
+}
+
+// Color a cell based on its activation value.
+// Green = positive, red = negative, gray = zero.
+function colorCell(cell, value, maxAbs) {
+  if (value === 0 || !isFinite(value)) {
+    cell.style.background = 'var(--bg4)';
+    cell.style.boxShadow = 'none';
+    return;
+  }
+  const intensity = Math.min(1, Math.abs(value) / (maxAbs || 1));
+  if (value > 0) {
+    cell.style.background = `rgba(61,217,138,${0.15 + intensity * 0.7})`;
+  } else {
+    cell.style.background = `rgba(255,106,106,${0.15 + intensity * 0.7})`;
+  }
+  cell.style.boxShadow = intensity > 0.8 ? `0 0 6px currentColor` : 'none';
+}
+
+// ─── DMEM map ───
+function buildDMEMMap() {
+  // Flat layout order (matches training script):
+  //   fc1.w (3840), fc1.b (96), fc2.w (4032), fc2.b (42), fc3.w (168), fc3.b (4), pad (10)
+  const segments = [
+    { cls: 'seg-fc1w', label: 'fc1.W',   size: H1 * N_FEAT },
+    { cls: 'seg-fc1b', label: 'fc1.b',   size: H1 },
+    { cls: 'seg-fc2w', label: 'fc2.W',   size: H2 * H1 },
+    { cls: 'seg-fc2b', label: 'fc2.b',   size: H2 },
+    { cls: 'seg-fc3w', label: 'fc3.W',   size: N_CLS * H2 },
+    { cls: 'seg-fc3b', label: 'fc3.b',   size: N_CLS },
+  ];
+  const totalUsed = segments.reduce((a, s) => a + s.size, 0);
+  const pad = DMEM_TOTAL - totalUsed;
+  segments.push({ cls: 'seg-pad', label: 'pad', size: pad });
+
+  const grid = document.getElementById('dmemGrid');
+  grid.innerHTML = '';
+
+  for (let t = 0; t < N_THREADS; t++) {
+    const threadStart = t * DMEM_DEPTH;
+    const threadEnd = threadStart + DMEM_DEPTH;
+    // For this thread's 2048 addresses, figure out which segments appear.
+    const threadSegs = [];
+    let flatPos = 0;
+    for (const seg of segments) {
+      const segStart = flatPos;
+      const segEnd = flatPos + seg.size;
+      // Intersection with this thread's window
+      const ovStart = Math.max(segStart, threadStart);
+      const ovEnd   = Math.min(segEnd, threadEnd);
+      if (ovStart < ovEnd) {
+        threadSegs.push({
+          ...seg,
+          localStart: ovStart - threadStart,
+          localSize: ovEnd - ovStart,
+          globalStart: ovStart,
+          globalEnd: ovEnd - 1,
+        });
+      }
+      flatPos = segEnd;
+    }
+
+    const threadDiv = document.createElement('div');
+    threadDiv.className = 'dmem-thread';
+    threadDiv.innerHTML = `
+      <div class="dmem-thread-title"><span>Thread ${t}</span><span>${DMEM_DEPTH}w</span></div>
+      <div class="dmem-bar" id="dbar-${t}"></div>
+    `;
+    grid.appendChild(threadDiv);
+
+    const bar = threadDiv.querySelector('.dmem-bar');
+    for (const seg of threadSegs) {
+      const segDiv = document.createElement('div');
+      segDiv.className = 'dmem-seg ' + seg.cls;
+      const hPct = (seg.localSize / DMEM_DEPTH) * 100;
+      segDiv.style.height = hPct + '%';
+      segDiv.dataset.tip = `${seg.label} · addr ${seg.localStart}–${seg.localStart + seg.localSize - 1} (T${t}) · flat ${seg.globalStart}–${seg.globalEnd}`;
+      if (hPct > 12) {
+        segDiv.innerHTML = `<span class="dmem-seg-label">${seg.label} · ${seg.localSize}w</span>`;
+      }
+      segDiv.addEventListener('mouseenter', e => {
+        showTooltip(e, 'DMEM segment', segDiv.dataset.tip);
+      });
+      segDiv.addEventListener('mouseleave', hideTooltip);
+      bar.appendChild(segDiv);
+    }
+  }
+}
+
+// ════════════════ NETWORK CANVAS ════════════════
+// Draws the layered ANN with colored neurons and weighted edges.
+function drawNetwork() {
+  const canvas = document.getElementById('netCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Layer layout
+  const layers = [
+    { n: N_FEAT, show: 16, color: '#3dd98a', x: 100, label: 'Input', sub: '40 scaled',   activations: state.scaledInput },
+    { n: H1,     show: 20, color: '#a77bff', x: 380, label: 'h₁',    sub: '96 · ReLU',   activations: state.h1 },
+    { n: H2,     show: 16, color: '#f7a845', x: 720, label: 'h₂',    sub: '42 · ReLU',   activations: state.h2 },
+    { n: N_CLS,  show: 4,  color: '#ff6a6a', x: 1000, label: 'Out', sub: '4 logits',    activations: state.logits }
+  ];
+  const R = 8;
+  const TOP = 48, BOT = 36;
+  const yOfNeuron = (layer, nIdx) => {
+    const show = layer.show;
+    const avail = H - TOP - BOT;
+    const spacing = Math.min(14, avail / (show + 1));
+    const total = (show - 1) * spacing;
+    return TOP + (avail - total) / 2 + nIdx * spacing;
+  };
+
+  // Map shown index to real index: evenly spaced subsample of the layer.
+  function realIdx(layer, shownIdx) {
+    return Math.round(shownIdx * (layer.n - 1) / (layer.show - 1 || 1));
+  }
+
+  // Edges (sampled, colored by weight sign and thickness by magnitude)
+  for (let li = 0; li < layers.length - 1; li++) {
+    const src = layers[li], dst = layers[li + 1];
+    const W_mat = [model.w1, model.w2, model.w3][li];
+    const inDim = [N_FEAT, H1, H2][li];
+    for (let a = 0; a < src.show; a++) {
+      for (let b = 0; b < dst.show; b++) {
+        const ai = realIdx(src, a);
+        const bi = realIdx(dst, b);
+        const weight = W_mat ? W_mat[bi * inDim + ai] : 0;
+        const absW = Math.abs(weight);
+        ctx.beginPath();
+        ctx.moveTo(src.x + R, yOfNeuron(src, a));
+        ctx.lineTo(dst.x - R, yOfNeuron(dst, b));
+        ctx.strokeStyle = weight > 0 ? `rgba(61,217,138,${Math.min(0.5, absW * 2.5)})`
+                                     : `rgba(255,106,106,${Math.min(0.5, absW * 2.5)})`;
+        ctx.lineWidth = Math.min(1.2, absW * 4 + 0.2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Find max abs activation per layer for scaling
+  function maxAbs(arr) {
+    if (!arr) return 1;
+    let m = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const v = Math.abs(arr[i]);
+      if (v > m) m = v;
+    }
+    return m || 1;
+  }
+
+  // Neurons
+  layers.forEach((layer, li) => {
+    const mAbs = maxAbs(layer.activations);
+    for (let ni = 0; ni < layer.show; ni++) {
+      const ri = realIdx(layer, ni);
+      const x = layer.x, y = yOfNeuron(layer, ni);
+      const act = layer.activations ? layer.activations[ri] : 0;
+      const rel = Math.min(1, Math.abs(act) / mAbs);
+
+      // Fill color by sign
+      let fill;
+      if (!act || !isFinite(act)) fill = '#1a1e2c';
+      else if (act > 0) {
+        const a = 0.1 + rel * 0.85;
+        fill = `rgba(61,217,138,${a})`;
+      } else {
+        const a = 0.1 + rel * 0.85;
+        fill = `rgba(255,106,106,${a})`;
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, R, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.strokeStyle = layer.color;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      // Mark dead ReLUs (in hidden layers) with a small dot
+      if ((li === 1 || li === 2) && act === 0) {
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#606780';
+        ctx.fill();
+      }
+    }
+    // Ellipsis if subsampled
+    if (layer.n > layer.show) {
+      ctx.fillStyle = '#606780';
+      ctx.font = '12px IBM Plex Sans, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⋮', layer.x, yOfNeuron(layer, layer.show - 1) + 18);
+    }
+  });
+
+  // Labels
+  layers.forEach(layer => {
+    ctx.fillStyle = layer.color;
+    ctx.font = '500 14px IBM Plex Sans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(layer.label, layer.x, 20);
+    ctx.fillStyle = '#606780';
+    ctx.font = '10px IBM Plex Mono, monospace';
+    ctx.fillText(layer.sub, layer.x, 36);
+  });
+  // Op labels between layers
+  const ops = ['× W₁ + b₁  →  ReLU', '× W₂ + b₂  →  ReLU', '× W₃ + b₃  →  argmax'];
+  for (let i = 0; i < ops.length; i++) {
+    const mid = (layers[i].x + layers[i + 1].x) / 2;
+    ctx.fillStyle = '#5c9cff';
+    ctx.font = '11px IBM Plex Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(ops[i], mid, H - 14);
+  }
+}
+
+// ════════════════ WEIGHT HEATMAP ════════════════
+function drawWeightHeatmap() {
+  const canvas = document.getElementById('wmapCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#1a1e2c';
+  ctx.fillRect(0, 0, W, H);
+
+  let mat, rows, cols, label;
+  if (ui.currentWeightLayer === 'fc1') {
+    mat = model.w1; rows = H1; cols = N_FEAT; label = `fc1.weight · (${rows},${cols})`;
+  } else if (ui.currentWeightLayer === 'fc2') {
+    mat = model.w2; rows = H2; cols = H1;     label = `fc2.weight · (${rows},${cols})`;
+  } else {
+    mat = model.w3; rows = N_CLS; cols = H2;  label = `fc3.weight · (${rows},${cols})`;
+  }
+  document.getElementById('wmapBadge').textContent = label;
+  if (!mat) return;
+
+  // Compute max abs for color scaling
+  let maxAbs = 1e-6;
+  for (let i = 0; i < mat.length; i++) {
+    const v = Math.abs(mat[i]);
+    if (v > maxAbs) maxAbs = v;
+  }
+
+  const cellW = W / cols;
+  const cellH = H / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = mat[r * cols + c];
+      const intensity = Math.min(1, Math.abs(v) / maxAbs);
+      ctx.fillStyle = v > 0
+        ? `rgba(61,217,138,${0.15 + intensity * 0.85})`
+        : `rgba(255,106,106,${0.15 + intensity * 0.85})`;
+      ctx.fillRect(c * cellW, r * cellH, Math.ceil(cellW), Math.ceil(cellH));
+    }
+  }
+
+  // Highlight selected cell
+  if (ui.selectedWeight && ui.selectedWeight.layer === ui.currentWeightLayer) {
+    const { row, col } = ui.selectedWeight;
+    ctx.strokeStyle = '#f7a845';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(col * cellW - 1, row * cellH - 1, cellW + 2, cellH + 2);
+  }
+}
+
+function setWeightLayer(layer, btn) {
+  ui.currentWeightLayer = layer;
+  document.querySelectorAll('.wmap-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  ui.selectedWeight = null;
+  drawWeightHeatmap();
+  updateBF16Inspector(null);
+}
+
+// Click on heatmap to inspect
+function onWmapClick(e) {
+  const canvas = document.getElementById('wmapCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top)  * (canvas.height / rect.height);
+
+  let mat, rows, cols;
+  if (ui.currentWeightLayer === 'fc1') { mat = model.w1; rows = H1; cols = N_FEAT; }
+  else if (ui.currentWeightLayer === 'fc2') { mat = model.w2; rows = H2; cols = H1; }
+  else { mat = model.w3; rows = N_CLS; cols = H2; }
+
+  const col = Math.floor(x / (canvas.width / cols));
+  const row = Math.floor(y / (canvas.height / rows));
+  if (row < 0 || row >= rows || col < 0 || col >= cols) return;
+
+  const v = mat[row * cols + col];
+  ui.selectedWeight = { layer: ui.currentWeightLayer, row, col, value: v };
+  drawWeightHeatmap();
+  updateBF16Inspector({ row, col, value: v, layer: ui.currentWeightLayer });
+}
+
+// ════════════════ BF16 INSPECTOR ════════════════
+function updateBF16Inspector(info) {
+  const el = document.getElementById('bf16Inspector');
+  if (!info) {
+    el.innerHTML = `<div style="color:var(--text3);font-size:11px;">Click a weight cell above to see its BF16 bits.</div>`;
+    return;
+  }
+  const word = floatToBF16(info.value);
+  const f32 = info.value;
+  const bf16 = bf16ToFloat(word);
+  const err = Math.abs(f32 - bf16);
+  const parts = bf16Parts(word);
+
+  const signBit = `<div class="bit bit-sign ${parts.sign ? '' : 'off'}">${parts.sign}</div>`;
+  const expBits = Array.from({length: 8}, (_, i) => {
+    const bit = (parts.exp >> (7 - i)) & 1;
+    return `<div class="bit bit-exp ${bit ? '' : 'off'}">${bit}</div>`;
+  }).join('');
+  const fracBits = Array.from({length: 7}, (_, i) => {
+    const bit = (parts.frac >> (6 - i)) & 1;
+    return `<div class="bit bit-frac ${bit ? '' : 'off'}">${bit}</div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="font-size:10px;color:var(--text3);margin-bottom:4px;">
+      ${info.layer}.weight[${info.row}, ${info.col}]
+    </div>
+    <div class="bf16-bits">
+      <div class="bit-group">${signBit}</div>
+      <span class="bit-sep">|</span>
+      <div class="bit-group">${expBits}</div>
+      <span class="bit-sep">|</span>
+      <div class="bit-group">${fracBits}</div>
+    </div>
+    <div style="font-size:9px;color:var(--text3);display:flex;justify-content:space-between;padding:0 2px;">
+      <span style="color:var(--red);">sign</span>
+      <span style="color:var(--amber);">exp = ${parts.exp} → 2^${parts.exp - 127}</span>
+      <span style="color:var(--accent);">mantissa = ${parts.frac}</span>
+    </div>
+    <table class="bf16-table" style="margin-top:12px;">
+      <tr><td>Float32 value</td><td>${f32.toFixed(8)}</td></tr>
+      <tr><td>BF16 hex</td><td class="bf16-hex-val">0x${bf16Hex(word)}</td></tr>
+      <tr><td>BF16 value</td><td>${bf16.toFixed(8)}</td></tr>
+      <tr><td>Rounding error</td><td style="color:${err > 0.001 ? 'var(--amber)' : 'var(--green)'}">${err.toExponential(3)}</td></tr>
+      <tr><td>Mantissa (binary)</td><td>1.${parts.frac.toString(2).padStart(7,'0')}</td></tr>
+    </table>
+  `;
+}
+
+// ════════════════ TOOLTIP ════════════════
+function showTooltip(e, title, body) {
+  const tt = document.getElementById('tooltip');
+  document.getElementById('ttTitle').textContent = title;
+  document.getElementById('ttBody').innerHTML = body;
+  tt.classList.add('show');
+  const rect = tt.getBoundingClientRect();
+  const x = Math.min(window.innerWidth - rect.width - 12, e.clientX + 12);
+  const y = Math.min(window.innerHeight - rect.height - 12, e.clientY + 12);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('show');
+}
+function onCellHover(e) {
+  const cell = e.currentTarget;
+  const tag = cell.dataset.tag;
+  const idx = parseInt(cell.dataset.idx);
+  let value = 0, title = '', body = '';
+  if (tag === 'scaled') {
+    value = state.scaledInput[idx];
+    title = `Scaled input #${idx}`;
+    body = `<b>${FEAT_NAMES[idx]}</b><br>raw: ${state.rawInput[idx].toFixed(3)}<br>scaled: ${value.toFixed(4)}<br>bf16: 0x${bf16Hex(floatToBF16(value))}`;
+  } else if (tag === 'h1') {
+    value = state.h1 ? state.h1[idx] : 0;
+    const pre = state.preH1 ? state.preH1[idx] : 0;
+    title = `h₁ unit #${idx}`;
+    body = `pre-ReLU: ${pre.toFixed(4)}<br>h₁ = max(0, z): ${value.toFixed(4)}<br>bf16: 0x${bf16Hex(floatToBF16(value))}${value === 0 && pre < 0 ? '<br><span style="color:var(--red)">dead (ReLU clipped)</span>' : ''}`;
+  } else if (tag === 'h2') {
+    value = state.h2 ? state.h2[idx] : 0;
+    const pre = state.preH2 ? state.preH2[idx] : 0;
+    title = `h₂ unit #${idx}`;
+    body = `pre-ReLU: ${pre.toFixed(4)}<br>h₂ = max(0, z): ${value.toFixed(4)}<br>bf16: 0x${bf16Hex(floatToBF16(value))}`;
+  } else if (tag === 'out') {
+    value = state.logits ? state.logits[idx] : 0;
+    title = `Output · ${CLASS_NAMES[idx]}`;
+    body = `logit: ${value.toFixed(4)}<br>softmax prob: ${(state.probs ? state.probs[idx] * 100 : 0).toFixed(2)}%<br>bf16: 0x${bf16Hex(floatToBF16(value))}`;
+  }
+  showTooltip(e, title, body);
+}
+
+// ════════════════ UPDATE UI FROM STATE ════════════════
+function updateUI() {
+  // Scaled grid
+  let maxAbs = 0;
+  for (let i = 0; i < N_FEAT; i++) maxAbs = Math.max(maxAbs, Math.abs(state.scaledInput[i]));
+  document.querySelectorAll('#scaledGrid .act-cell').forEach((cell, i) => {
+    colorCell(cell, state.scaledInput[i], maxAbs || 1);
+  });
+  document.getElementById('scalerMeta').textContent =
+    `range [${Math.min(...state.scaledInput).toFixed(2)}, ${Math.max(...state.scaledInput).toFixed(2)}]`;
+
+  // h1 grid
+  let h1max = 0, h1dead = 0;
+  for (let i = 0; i < H1; i++) {
+    const v = state.h1 ? state.h1[i] : 0;
+    h1max = Math.max(h1max, Math.abs(v));
+    if (v === 0) h1dead++;
+  }
+  document.querySelectorAll('#h1Grid .act-cell').forEach((cell, i) => {
+    colorCell(cell, state.h1 ? state.h1[i] : 0, h1max || 1);
+  });
+  document.getElementById('h1Meta').textContent =
+    `${h1dead}/${H1} dead (${(h1dead / H1 * 100).toFixed(0)}%) · max=${h1max.toFixed(3)}`;
+
+  // h2 grid
+  let h2max = 0, h2dead = 0;
+  for (let i = 0; i < H2; i++) {
+    const v = state.h2 ? state.h2[i] : 0;
+    h2max = Math.max(h2max, Math.abs(v));
+    if (v === 0) h2dead++;
+  }
+  document.querySelectorAll('#h2Grid .act-cell').forEach((cell, i) => {
+    colorCell(cell, state.h2 ? state.h2[i] : 0, h2max || 1);
+  });
+  document.getElementById('h2Meta').textContent =
+    `${h2dead}/${H2} dead (${(h2dead / H2 * 100).toFixed(0)}%) · max=${h2max.toFixed(3)}`;
+
+  // Output grid + prediction
+  if (state.logits) {
+    const maxLogit = Math.max(...state.logits);
+    const minLogit = Math.min(...state.logits);
+    const range = (maxLogit - minLogit) || 1;
+    const winIdx = Array.from(state.logits).indexOf(maxLogit);
+
+    document.querySelectorAll('#outGrid .act-cell').forEach((cell, i) => {
+      const logit = state.logits[i];
+      const prob  = state.probs[i];
+      const intensity = (logit - minLogit) / range;
+      cell.style.background = `rgba(${hexToRgb(CLASS_COLORS[i])}, ${0.1 + intensity * 0.6})`;
+      cell.classList.toggle('winner', i === winIdx);
+      document.getElementById('oc-val-' + i).textContent  = logit.toFixed(3);
+      document.getElementById('oc-prob-' + i).textContent = (prob * 100).toFixed(1) + '%';
+    });
+    document.getElementById('predName').innerHTML =
+      `<span style="color:${CLASS_COLORS[winIdx]}">${CLASS_NAMES[winIdx]}</span>`;
+    document.getElementById('predConf').textContent =
+      `softmax confidence: ${(state.probs[winIdx] * 100).toFixed(1)}% · logit ${state.logits[winIdx].toFixed(3)}`;
+    document.getElementById('outMeta').textContent =
+      `argmax = #${winIdx} (${CLASS_NAMES[winIdx]})`;
+  }
+
+  // Network canvas
+  drawNetwork();
+}
+// Convert #RRGGBB to "r, g, b"
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0,2), 16);
+  const g = parseInt(h.slice(2,4), 16);
+  const b = parseInt(h.slice(4,6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
+// ════════════════ WALKTHROUGH ════════════════
+const WT_STEPS = [
+  {
+    title: 'Load input',
+    body: `A 40-dim input vector arrives. These are <b>scaled feature values</b> — already normalized
+           via <code>(x − μ) / σ</code>. Each one represents something like an inter-arrival time,
+           packet count, or IEC104 <code>cot_frac</code>. Try a preset to see a realistic pattern.`
+  },
+  {
+    title: 'Layer 1 MAC',
+    body: `Each of the 96 hidden-1 units runs a <b>BF16 multiply-accumulate</b>:
+           <code>z = Σᵢ W₁[o,i]·x̂[i] + b₁[o]</code>.<br>Every partial product and every partial
+           sum is rounded back to BF16 — exactly as the hardware MAC does.`
+  },
+  {
+    title: 'ReLU (layer 1)',
+    body: `Negative pre-activations are zeroed: <code>h₁ = max(0, z)</code>. Dead cells are shown
+           as empty squares in the h₁ grid. Healthy ReLU layers are typically <b>30–60% dead</b>
+           per example — much more indicates capacity loss.`
+  },
+  {
+    title: 'Layer 2 + ReLU',
+    body: `<code>h₂ = ReLU(W₂·h₁ + b₂)</code>. The 42 h₂ units recombine the 96 h₁ features into
+           higher-level patterns — e.g. "bursty short-APDU command sequence" rather than the
+           raw "flow IAT std" feature it started with.`
+  },
+  {
+    title: 'Output logits',
+    body: `The final linear layer has <b>no ReLU</b>. <code>z₃ = W₃·h₂ + b₃</code> produces 4
+           real-valued logits, one per class. Higher = more evidence for that class. Softmax is
+           shown for readability but hardware does straight <code>argmax</code>.`
+  },
+  {
+    title: 'Prediction',
+    body: `<code>predicted class = argmax(z₃)</code>. The four possible outcomes are
+           <b>DoS</b>, <b>NORMAL</b>, <b>c_ci_na_1</b> (IEC104 interrogation), <b>c_se_na_1</b> (IEC104 setpoint).
+           On-device this single integer is the signal the classifier emits per time-window of traffic.`
+  }
+];
+function renderWalkthrough() {
+  const s = WT_STEPS[ui.walkthroughStep];
+  document.getElementById('wtNum').textContent = ui.walkthroughStep + 1;
+  document.getElementById('wtTitle').textContent = s.title;
+  document.getElementById('wtBody').innerHTML = s.body;
+  document.getElementById('wtCounter').textContent = `${ui.walkthroughStep + 1} / ${WT_STEPS.length}`;
+}
+function wtNext() {
+  ui.walkthroughStep = (ui.walkthroughStep + 1) % WT_STEPS.length;
+  renderWalkthrough();
+}
+function wtPrev() {
+  ui.walkthroughStep = (ui.walkthroughStep - 1 + WT_STEPS.length) % WT_STEPS.length;
+  renderWalkthrough();
+}
+
+// ════════════════ MAIN RUN ════════════════
+function runPipeline() {
+  forwardPass();
+  updateUI();
+}
+
+// ════════════════ INIT ════════════════
+function init() {
+  initRandomWeights();
+  buildFeatureSliders();
+  buildFeatureSelectionViz();
+  buildActivationGrids();
+  buildDMEMMap();
+  renderWalkthrough();
+
+  // Hook up pipeline bar scroll
+  document.querySelectorAll('.stage').forEach(s => {
+    s.addEventListener('click', () => {
+      document.querySelectorAll('.stage').forEach(x => x.classList.remove('active'));
+      s.classList.add('active');
+      const target = document.getElementById(s.dataset.scroll);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  // Hook up weight heatmap click
+  document.getElementById('wmapCanvas').addEventListener('click', onWmapClick);
+
+  // Run initial forward pass with zero inputs
+  runPipeline();
+  drawWeightHeatmap();
+}
+
+// Kick off
+init();
+</script>
+</body>
+</html>
